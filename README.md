@@ -20,6 +20,9 @@ pick up `CLAUDE.md` automatically.
    completion rules, and every API route, all without a database. Then `npm run migrate` against
    a local Postgres+PostGIS and re-run the tests with `TEST_DATABASE_URL` set (one command in
    `server/README.md`) before pointing the client at it.
+1b. Or skip the local setup entirely: `JWT_SECRET=$(openssl rand -hex 32) docker compose up --build`
+   brings up Postgres+PostGIS, migrates, and serves the API on `localhost:3000` — ready for a
+   tunnel to put TLS in front of it for the phone.
 2. Author a trail: promote a player with `npm run grant-admin -- <userId>`, then
    `POST /api/v1/admin/trails` and publish a version. That's how the field-test trail gets made
    until EPIC 7's desktop UI exists.

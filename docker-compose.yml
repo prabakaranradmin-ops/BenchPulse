@@ -1,0 +1,62 @@
+# Local/field-test backend: Postgres+PostGIS, migrations, and the API.
+#
+#   JWT_SECRET=$(openssl rand -hex 32) docker compose up --build
+#
+# Then point a tunnel (Cloudflare Tunnel, ngrok, …) at localhost:3000. TLS lives in the tunnel,
+# not here — iOS ATS and Android both refuse cleartext, so the phone must reach an https URL
+# (§6.8 wants TLS 1.3).
+
+services:
+  db:
+    # PostGIS, not stock postgres: the schema has a GEOGRAPHY generated column and a GIST index.
+    image: postgis/postgis:16-3.4-alpine
+    environment:
+      POSTGRES_USER: arquest
+      POSTGRES_PASSWORD: arquest
+      POSTGRES_DB: ar_quest_trail
+    ports:
+      # Non-default host port, so this can't collide with a Postgres already on 5432.
+      - '55432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # -h 127.0.0.1 forces a TCP check. Without it pg_isready talks to the Unix socket, which
+      # answers during the image's init phase — before the TCP listener exists — so dependants
+      # start against a refused connection.
+      test: ['CMD-SHELL', 'pg_isready -U arquest -d ar_quest_trail -h 127.0.0.1 -p 5432']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Runs once and exits; the API waits for it to succeed rather than racing an unmigrated schema.
+  migrate:
+    build:
+      context: ./server
+    command: npm run migrate
+    environment:
+      DATABASE_URL: postgres://arquest:arquest@db:5432/ar_quest_trail
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build:
+      context: ./server
+    ports:
+      - '3000:3000'
+    environment:
+      DATABASE_URL: postgres://arquest:arquest@db:5432/ar_quest_trail
+      PORT: 3000
+      # No default on purpose. This process gets exposed to the public internet through a
+      # tunnel, and a shipped placeholder secret would forge any player's session.
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET, e.g. JWT_SECRET=$(openssl rand -hex 32) docker compose up}
+      LOCATION_HISTORY_RETENTION_DAYS: ${LOCATION_HISTORY_RETENTION_DAYS:-90}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:

@@ -89,6 +89,9 @@ now exchange a device key for a token, fetch a trail, start an attempt, and comp
   to open sky" hint from SR-GEO-04.
 - **ST-4.3 — Field test**: one real-device walkthrough of a 2-pin trail end to end, per the field
   test matrix in requirements §7, before adding anything past this point.
+  **Deployable artifact exists:** `docker compose up --build` (repo root) runs Postgres+PostGIS,
+  migrations, and the API on port 3000, verified end to end in-container. TLS/tunnelling in
+  front of it is still a hosting task, not a code one.
   **Server side is ready and rehearsed:** `npm run seed:field-test -- --lat <lat> --lng <lng>`
   authors a trail at a real location and prints the device keys the client needs. The full
   chain (token exchange → trail fetch → attempt → dwell pins → a wrong code → the right code →

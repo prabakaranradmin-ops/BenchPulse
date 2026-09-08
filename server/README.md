@@ -33,6 +33,36 @@ npm run grant-admin -- <userId>      # promote a player to Admin (EPIC 7); add `
 npm run seed:field-test -- --lat <lat> --lng <lng>   # author a walkable trail (see below)
 ```
 
+## Running in a container
+
+`docker-compose.yml` at the repo root brings up Postgres+PostGIS, applies migrations, and starts
+the API:
+
+```bash
+JWT_SECRET=$(openssl rand -hex 32) docker compose up --build
+```
+
+Then point a tunnel (Cloudflare Tunnel, ngrok, …) at `localhost:3000`. **TLS lives in the tunnel
+or the host, not in this process** — iOS ATS and Android both refuse cleartext, so the phone has
+to reach an `https` URL (§6.8 wants TLS 1.3 in front).
+
+`JWT_SECRET` has no default on purpose: this gets exposed to the public internet through a
+tunnel, and a shipped placeholder would let anyone forge any player's session. Compose fails
+with an explanatory error if it's unset.
+
+Seeding works inside the container too, since `dist/` ships with the image:
+
+```bash
+docker compose exec api node dist/jobs/seedFieldTestTrail.js --lat 13.0827 --lng 80.2707 --code SWAN42
+```
+
+The image is deliberately host-neutral — the same artifact runs on a VPS or a PaaS. It runs as
+the unprivileged `node` user, carries a `HEALTHCHECK` against `/health`, and handles `SIGTERM`
+so the pg pool is released on shutdown (verified: stops in ~1s with exit 0, not a 10s SIGKILL).
+`migrations/` ships in the image so a host's release step can run `npm run migrate` against the
+exact code being deployed — which is why `node-pg-migrate` is a runtime dependency rather than
+a dev one.
+
 ### Seeding a trail for the field test (ST-4.3)
 
 A walkable trail at your actual test location, in one command:
