@@ -17,7 +17,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "seed:field-test": "tsx src/jobs/seedFieldTestTrail.ts"
   },
   "dependencies": {
     "@fastify/jwt": "^10.2.2",

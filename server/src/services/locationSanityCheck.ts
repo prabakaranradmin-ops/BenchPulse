@@ -48,7 +48,8 @@ const DEFAULTS: Required<SanityCheckOptions> = {
   minSamplesForSustainedCheck: 3,
 };
 
-const EARTH_RADIUS_M = 6371000;
+/** Mean earth radius. Exported so anything placing points uses the same sphere this measures on. */
+export const EARTH_RADIUS_M = 6371000;
 
 function toRad(deg: number): number {
   return (deg * Math.PI) / 180;

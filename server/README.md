@@ -30,7 +30,27 @@ npm run migrate:create -- add-something   # scaffold the next migration file
 
 npm run job:purge-location-history   # SR-PRIV-01 retention purge (see below)
 npm run grant-admin -- <userId>      # promote a player to Admin (EPIC 7); add `player` to demote
+npm run seed:field-test -- --lat <lat> --lng <lng>   # author a walkable trail (see below)
 ```
+
+### Seeding a trail for the field test (ST-4.3)
+
+A walkable trail at your actual test location, in one command:
+
+```bash
+npm run seed:field-test -- --lat 13.0827 --lng 80.2707
+npm run seed:field-test -- --lat 51.5 --lng -0.12 --pins 3 --spacing 80 --code SWAN42
+```
+
+It creates an Admin, a test player, and a published trail whose pins march east from the given
+point (`--spacing` metres apart, `--radius`/`--dwell` to taste), then prints the device keys and
+pin coordinates the client needs. `--code` makes the final pin a `code_entry` challenge so a
+field test exercises ST-6.2 as well as the dwell.
+
+Writes go through the same store and the same SR-ADMIN-01/02 validation as the Admin API, so a
+seeded trail is indistinguishable from an authored one — structural errors refuse to seed, and
+advisory warnings (pins too close, and so on) print but don't stop it. Pass `--admin-key` and
+`--player-key` to reuse identities across runs.
 
 ### Admin access
 
