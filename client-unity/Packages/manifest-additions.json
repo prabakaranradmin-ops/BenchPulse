@@ -1,0 +1,9 @@
+{
+  "_comment": "Merge these entries into the generated Packages/manifest.json's 'dependencies' object after creating the Unity project. Version numbers are illustrative — check the Package Manager / Google's ARCore Extensions repo for current versions before installing.",
+  "dependencies": {
+    "com.unity.xr.arfoundation": "5.1.5",
+    "com.unity.xr.arcore": "5.1.5",
+    "com.unity.xr.arkit": "5.1.5"
+  },
+  "_arcore_extensions_note": "ARCore Extensions for AR Foundation (Google Geospatial API) is not distributed through the main Unity registry. Install via Unity's Package Manager 'Add package from git URL' using the URL and version Google's current ARCore Extensions documentation specifies, or via the .tgz distribution if that's what's current when you set this up."
+}

@@ -1,0 +1,159 @@
+# AR Quest-Trail Game — Backlog (Epics → Stories → Tasks)
+
+Derived from `requirements-v1.0.md`. Each story lists the requirement IDs it implements and an
+acceptance criterion you can turn directly into a test, per the project's "test every phase" rule.
+Ordered to match the build sequence in `../CLAUDE.md` — do them roughly top to bottom.
+
+---
+
+## EPIC 1 — Backend: Data Layer
+**Status: mostly done in the starter you already have.**
+
+- **ST-1.1 — Location sanity check (SR-SEC-02)** ✅ DONE
+  `server/src/services/locationSanityCheck.ts`, 6 passing tests.
+- **ST-1.2 — Database schema (SR-DATA-01/02, GDR-06/07/08, SR-PRIV-01, GDR-09)** ✅ DONE
+  Now lives in `server/migrations/` (see ST-1.3). Two FK behaviours changed while building
+  ST-8.2, because SR-PRIV-02 deletion needs them: `trail_attempts.user_id` and
+  `location_history.user_id` cascade on user delete, and `pin_reports.reported_by_user_id` is
+  nullable with ON DELETE SET NULL so an Admin queue item outlives the player who filed it.
+- **ST-1.3 — Migration tooling** ✅ DONE
+  `node-pg-migrate` 9 + `server/migrations/`; `npm run migrate` is idempotent (verified in the
+  ST-2.7 integration test, which now builds its throwaway schema from the real migrations).
+  `src/db/schema.sql` was converted into the initial migration and removed — migrations are the
+  single source of truth, and are append-only from here.
+
+## EPIC 2 — Backend: Trail & Pin API Routes
+**Status: done — 59 passing tests. See `server/README.md` for the API reference.**
+
+- **ST-2.1 — `GET /api/v1/trails/:trailId`** (SR-NET-01) ✅ DONE
+  `server/src/routes/trails.ts` + `services/pinDto.ts` (allowlisted `challenge_config` keys, so a
+  `code_entry` answer is never shipped to the device). Tests: ordering, secret-stripping,
+  unpublished/unknown 404s, 401.
+
+- **ST-2.2 — `POST /api/v1/attempts`** (GDR-06, GDR-07) ✅ DONE
+  `server/src/routes/attempts.ts`. Also added `GET /api/v1/attempts/:attemptId` — CR-02 progress
+  persistence is unusable without a resume path. Tests: version snapshot, first-pin-only unlock,
+  full-walkthrough-then-replay leaving the original attempt untouched, mid-trail Admin edit
+  (GDR-07), expiry-on-read (GDR-08).
+
+- **ST-2.3 — `POST /api/v1/attempts/:attemptId/pins/:pinId/complete`** (GDR-01, SR-GEO-04, SR-SEC-02, SR-DATA-01) ✅ DONE
+  `server/src/routes/pins.ts`, with the rules themselves as pure functions in
+  `services/completion.ts`. Tests: happy path, final-pin attempt completion, out-of-order and
+  re-completion rejection, cross-user rejection, out-of-radius, accuracy-widened radius,
+  weak-GPS ceiling, flagged-but-still-completed, offline capture-time persistence.
+
+- **ST-2.4 — `POST /api/v1/pins/:pinId/report`** (GDR-09) ✅ DONE
+  Tests: insert with/without a note, no dedup, unknown-pin 404, 401.
+
+- **ST-2.5 — JWT auth middleware** ✅ DONE
+  `server/src/plugins/auth.ts`, an `onRequest` hook on every `/api/v1` route. A token with no
+  `sub` is rejected too — it can't be scoped to a player. Per-user rate limiting (SR-SEC-03)
+  came with it, keyed on the verified `sub` rather than the IP.
+
+- **ST-2.6 — Player identity / token issuance** ✅ DONE (gap found while building ST-2.5)
+  `POST /api/v1/players/token` in `server/src/routes/players.ts`. Anonymous device-bound
+  identity `[ASSUMED — confirm or override]`: the client exchanges a stored high-entropy device
+  key for a 30-day session token; only the key's hash is stored. Added `users.device_key_hash`
+  to `schema.sql` — an existing database needs
+  `ALTER TABLE users ADD COLUMN device_key_hash TEXT UNIQUE;`.
+  **Open product question:** the device key is the account. No recovery, no cross-device sync
+  until real sign-in exists. Confirm that's acceptable for the field test, or promote sign-in.
+
+- **ST-2.7 — Postgres integration pass** ✅ DONE
+  `server/src/db/postgresStore.integration.test.ts` — loads `schema.sql` into a throwaway
+  schema and runs token exchange → trail fetch → attempt → both pins → replay → cross-player
+  rejection → pin report against real Postgres+PostGIS. Skips unless `TEST_DATABASE_URL` is
+  set, so the default `npm test` still needs no database.
+
+## EPIC 3 — Unity Client: AR Positioning Foundation
+**This is the next work.** The server side of ST-3.3/ST-4.1 is live and verified; a client can
+now exchange a device key for a token, fetch a trail, start an attempt, and complete pins.
+
+- **ST-3.1 — VPS localization + GPS fallback** (SR-GEO-03, SR-NET-03)
+  Fill in `VpsLocalizationService.cs`. AC: emits `PositionSource.Vps` only when horizontal
+  accuracy ≤0.5m and heading accuracy ≤5°; falls back to `GpsFallback` on VPS timeout/failure
+  without faking a tighter accuracy value than GPS actually reports.
+- **ST-3.2 — Floating origin / double-precision math** (SR-GEO-01, SR-GEO-02)
+  Fill in `PinController.ComputeLocalOffset`. Recommend using Cesium for Unity's georeference
+  component rather than hand-rolling the geodetic math.
+- **ST-3.3 — Trail fetch + local caching** (SR-NET-01)
+  Fill in `TrailManager.LoadTrail` against ST-2.1's endpoint; cache the response so a previously
+  downloaded trail can be browsed offline.
+
+## EPIC 4 — Unity Client: First Playable Slice
+
+- **ST-4.1 — Wire `ProximityDwellChallenge` to the real API**
+  Replace the local-only `OnChallengeCompleted` event with a call to ST-2.3's endpoint; handle
+  its response (including a rejected/flagged case) rather than assuming success.
+- **ST-4.2 — Minimal UI**: current-pin indicator, dwell progress, and the "GPS signal weak — move
+  to open sky" hint from SR-GEO-04.
+- **ST-4.3 — Field test**: one real-device walkthrough of a 2-pin trail end to end, per the field
+  test matrix in requirements §7, before adding anything past this point.
+
+## EPIC 5 — Occlusion & Fairness Polish
+*(Deliberately after Epic 4 — occlusion is fairness/polish, not gameplay-blocking.)*
+
+- **ST-5.1 — Hardware depth occlusion** (SR-VIS-01): wire `AROcclusionManager` on capable devices.
+- **ST-5.2 — Distance-fade fallback** (SR-VIS-02): fill in `OcclusionFallbackController.ApplyDistanceFade` for devices without a usable depth signal.
+
+## EPIC 6 — Additional Challenge Types
+- **ST-6.1 — `photo_confirmation`** (GDR-02, GDR-10 unlimited retries).
+- **ST-6.2 — `code_entry`** (GDR-02).
+
+## EPIC 7 — Desktop Admin Authoring Tool
+*(Backend pulled forward: until this existed, a trail could only be created with raw SQL, which
+blocked authoring the trail for the ST-4.3 field test. The 3D map UI is still unbuilt.)*
+- **ST-7.1 — Map-based pin placement UI** — not started. The desktop client for the API below;
+  original CRS's "3D desktop map interface".
+- **ST-7.2 — Publish flow** ✅ DONE (backend)
+  `POST /api/v1/admin/trails` and `POST /api/v1/admin/trails/:trailId/versions` in
+  `server/src/routes/admin.ts`. Publishing is transactional and additive (GDR-07): existing
+  versions and in-flight attempts are never touched, only `current_version_id` moves.
+  Advisory warnings (SR-ADMIN-01/02) in `server/src/services/trailValidation.ts`: pin spacing
+  below 2× the smaller radius, >25 pins, >20km route, `code_entry` with no code. Structural
+  errors (sequence gaps/duplicates, bad coordinates/radius/challenge type) block with a 422.
+  **Not implemented:** SR-ADMIN-01's water / building-footprint warnings — both need a
+  landcover or footprint data source that has to be chosen first.
+- **ST-7.3 — Pin report review queue** ✅ DONE (backend)
+  `GET /api/v1/admin/pin-reports` (status filter, newest first) and
+  `PATCH /api/v1/admin/pin-reports/:reportId`. The list never exposes who filed a report.
+- **ST-7.4 — Admin role** (NEW — needed by the above)
+  `users.role` (migration `1788837479386_admin-role.sql`) plus a `requireAdmin` hook that
+  re-reads the role per request, so revocation is immediate. Promotion is the out-of-band
+  `npm run grant-admin` CLI — there is deliberately no endpoint that grants authoring rights.
+
+## EPIC 8 — Privacy & Data Lifecycle
+*(Pulled forward ahead of EPICs 3–7: both are v1-scope, server-side, and testable now, while the
+client epics need the Unity Editor and a real device.)*
+
+- **ST-8.1 — Retention purge job** (SR-PRIV-01) ✅ DONE
+  `server/src/jobs/purgeLocationHistory.ts`, run with `npm run job:purge-location-history`.
+  90-day default `[ASSUMED — confirm]`, `LOCATION_HISTORY_RETENTION_DAYS` overrides it, and a
+  window below one day throws rather than purging everything.
+  **Still open:** nothing *schedules* it — that's a deploy-time task (cron / CronJob).
+- **ST-8.2 — "Delete my data" action** (SR-PRIV-02) ✅ DONE
+  `DELETE /api/v1/players/me`. Deletes location history, progress, attempts, and the player row;
+  pin reports survive with a null reporter. A stale token whose player is gone gets a clean 401.
+- **ST-8.3 — Anonymized analytics aggregation** (SR-PRIV-03) ✅ DONE
+  `GET /api/v1/admin/analytics/trails` and `.../trails/:trailId` (Admin-only), aggregating in
+  SQL from `trail_attempts`/`pin_progress` — never `location_history`, proven by a DB-backed
+  test that purges every location row and asserts the response is unchanged. Reports completion
+  counts and rate, median/p90 time-to-complete, and a per-pin drop-off funnel measured against
+  the players who reached each pin. `from` inclusive / `to` exclusive so ranges tile.
+  Migration `1788839036382_analytics-indexes.sql` adds the two supporting indexes.
+  **Product decision to confirm:** cohorts below 5 attempts have rates and timings suppressed
+  (`suppressed: true`, counts still reported) `[ASSUMED — confirm or override]`, since a rate
+  over one attempt is one identifiable player's outcome.
+  Requirements §8 keeps dashboarding out of v1 — this is the raw-aggregate API only.
+
+## EPIC 9 — Offline Resilience
+- **ST-9.1 — Offline completion queue** (SR-NET-02): queue completions attempted offline,
+  submit on reconnect timestamped at the *original* capture time, not reconnect time.
+- **ST-9.2 — UI indicator** for reduced-precision/offline mode.
+
+---
+
+### Explicitly not in this backlog (see requirements §8 Backlog)
+Shared/public world mode, social/team features, monetization, full anti-cheat (device
+attestation, mock-location detection), content moderation pipeline, multi-level/indoor pins,
+automated pin-relocation, i18n, formal accessibility audit, DR/backup SLA.

@@ -1,0 +1,20 @@
+# Node / server
+server/node_modules/
+server/dist/
+server/.env
+
+# Unity
+client-unity/Library/
+client-unity/Temp/
+client-unity/Obj/
+client-unity/Build/
+client-unity/Builds/
+client-unity/Logs/
+client-unity/UserSettings/
+client-unity/.vs/
+client-unity/*.csproj
+client-unity/*.sln
+client-unity/*.user
+
+# OS
+.DS_Store
