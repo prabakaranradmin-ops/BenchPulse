@@ -128,9 +128,11 @@ anyway gets a clean `401 player_not_found` from attempt creation rather than a d
 
 ### Completion endpoint
 
-Body: `{ lat, lng, accuracyM, recordedAt?, sessionStartedAt?, recentLocationHistory? }`.
-`recordedAt` is the device's _capture_ time, not submission time — an offline completion queued
-per SR-NET-02 submits with its original timestamp, and that is what gets persisted.
+Body: `{ lat, lng, accuracyM, recordedAt?, sessionStartedAt?, recentLocationHistory?,
+challengeAnswer? }`. `recordedAt` is the device's _capture_ time, not submission time — an
+offline completion queued per SR-NET-02 submits with its original timestamp, and that is what
+gets persisted. `challengeAnswer` carries the player's code for a `code_entry` pin and is
+ignored by other challenge types.
 
 Rejections are distinguishable so the client can show the right hint:
 
@@ -143,11 +145,36 @@ Rejections are distinguishable so the client can show the right hint:
 | 409    | `attempt_expired` / `attempt_not_active` | GDR-08.                                                                                                     |
 | 422    | `accuracy_exceeds_ceiling`               | Accuracy above the 50m ceiling — client shows "GPS signal weak — move to open sky" (SR-GEO-04).             |
 | 422    | `outside_effective_radius`               | Response carries `distanceM` and `effectiveRadiusM` for a "move closer" hint.                               |
+| 422    | `challenge_answer_required`              | A `code_entry` pin with no `challengeAnswer` sent (ST-6.2).                                                 |
+| 422    | `incorrect_code`                         | Wrong code. Unlimited retries, no lockout (GDR-10).                                                         |
+| 409    | `challenge_not_configured`               | A `code_entry` pin the Admin published without a code — an authoring fault, not the player's.               |
+| 409    | `challenge_type_not_implemented`         | `photo_confirmation`, until ST-6.1 lands.                                                                   |
 
 On success the response includes `nextPinId` (null on the final pin), `attemptStatus`
 (`completed` when the last pin lands, GDR-04), and `locationFlag` — non-null when SR-SEC-02
 flagged the movement. Per the spec's "flag, don't block" scope the completion still stands; the
 flag is logged with the `SR-SEC-02` requirement tag for review.
+
+### Challenge verification (ST-6.2)
+
+Answers are checked server-side only. `pinDto` withholds `challenge_config.code` from the trail
+payload, so the code exists in the database and on the real-world plaque — never on the device.
+
+Code comparison is forgiving in every way that doesn't lose information
+`[ASSUMED — confirm or override]`: Unicode NFKC folding, case-insensitive, and whitespace,
+underscores and the whole dash family stripped — so `SWAN42`, `swan 42` and `swan-42` are one
+code, while `SWAN4` and `SWAN042` are not. Verification runs **after** the position check (a
+distant player is told to move closer first) and **before** any write, so a wrong answer leaves
+no trace at all — not even a location sample — and can be retried immediately, which is what
+GDR-10's unlimited retries and GDR-12's stateless attempts require together.
+
+The comparison is not constant-time, deliberately: the code is printed in public on the object
+the player is standing beside, the player must already be inside the pin's radius to submit one,
+and SR-SEC-03 rate limiting caps guess throughput.
+
+A `photo_confirmation` pin is **refused** with `challenge_type_not_implemented` rather than
+completing on position alone. Granting progress for a challenge nothing can verify would be
+worse than a clear error while ST-6.1 is outstanding.
 
 ## What's implemented vs. stubbed
 

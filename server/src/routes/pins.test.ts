@@ -328,6 +328,197 @@ describe('POST /api/v1/attempts/:attemptId/pins/:pinId/complete (ST-2.3)', () =>
   });
 });
 
+describe('code_entry verification on completion (ST-6.2, GDR-02)', () => {
+  /** Pin 1 is a code pin; pin 2 is an ordinary dwell pin behind it. */
+  const CODE_TRAIL = {
+    pins: [
+      {
+        id: 'pin-1',
+        sequenceIndex: 1,
+        eastMeters: 0,
+        challengeType: 'code_entry' as const,
+        challengeConfig: { code: 'SWAN42', hint: 'On the plaque' },
+      },
+      { id: 'pin-2', sequenceIndex: 2, eastMeters: 300 },
+    ],
+  };
+
+  it('completes the pin when the code is right', async () => {
+    ctx = await buildTestApp(seedState(seedTrail(CODE_TRAIL)));
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+
+    const response = await completePin(ctx, {
+      userId: PLAYER_A,
+      attemptId,
+      pinId: 'pin-1',
+      challengeAnswer: 'SWAN42',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: 'completed', nextPinId: 'pin-2' });
+    expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('completed');
+  });
+
+  it('accepts the code however the player typed it', async () => {
+    for (const answer of ['swan42', 'Swan 42', ' swan-42 ']) {
+      ctx = await buildTestApp(seedState(seedTrail(CODE_TRAIL)));
+      const attemptId = await startAttempt(ctx, PLAYER_A);
+
+      const response = await completePin(ctx, {
+        userId: PLAYER_A,
+        attemptId,
+        pinId: 'pin-1',
+        challengeAnswer: answer,
+      });
+
+      expect({ answer, status: response.statusCode }).toEqual({ answer, status: 200 });
+      await ctx.app.close();
+      ctx = undefined;
+    }
+  });
+
+  it('rejects a wrong code without touching progress or location history (GDR-12)', async () => {
+    ctx = await buildTestApp(seedState(seedTrail(CODE_TRAIL)));
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+
+    const response = await completePin(ctx, {
+      userId: PLAYER_A,
+      attemptId,
+      pinId: 'pin-1',
+      challengeAnswer: 'SWAN43',
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toMatchObject({ error: 'incorrect_code', challengeType: 'code_entry' });
+    expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('unlocked');
+    // A failed attempt is stateless: nothing was written, not even a location sample.
+    expect(ctx.store.state.locationHistory).toHaveLength(0);
+  });
+
+  it('allows unlimited retries with no lockout (GDR-10)', async () => {
+    ctx = await buildTestApp(seedState(seedTrail(CODE_TRAIL)));
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+    const attempt = (answer: string) =>
+      completePin(ctx!, { userId: PLAYER_A, attemptId, pinId: 'pin-1', challengeAnswer: answer });
+
+    for (const wrong of ['nope', 'still-nope', 'SWAN41', 'SWAN43', 'guess']) {
+      expect((await attempt(wrong)).statusCode).toBe(422);
+    }
+
+    expect((await attempt('swan42')).statusCode).toBe(200);
+    expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('completed');
+  });
+
+  it('asks for the code when the player sent none', async () => {
+    ctx = await buildTestApp(seedState(seedTrail(CODE_TRAIL)));
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+
+    const response = await completePin(ctx, { userId: PLAYER_A, attemptId, pinId: 'pin-1' });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error).toBe('challenge_answer_required');
+    expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('unlocked');
+  });
+
+  it('checks position before the code, so a distant player is told to move first', async () => {
+    ctx = await buildTestApp(seedState(seedTrail(CODE_TRAIL)));
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+
+    const response = await completePin(ctx, {
+      userId: PLAYER_A,
+      attemptId,
+      pinId: 'pin-1',
+      lat: 0,
+      lng: lngAtMeters(500),
+      challengeAnswer: 'SWAN42',
+    });
+
+    expect(response.json().error).toBe('outside_effective_radius');
+  });
+
+  it('refuses a code pin with no code configured, and says whose fault it is', async () => {
+    ctx = await buildTestApp(
+      seedState(
+        seedTrail({
+          pins: [
+            {
+              id: 'pin-1',
+              sequenceIndex: 1,
+              eastMeters: 0,
+              challengeType: 'code_entry' as const,
+              challengeConfig: { hint: 'no code was ever set' },
+            },
+          ],
+        }),
+      ),
+    );
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+
+    const response = await completePin(ctx, {
+      userId: PLAYER_A,
+      attemptId,
+      pinId: 'pin-1',
+      challengeAnswer: 'anything',
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toBe('challenge_not_configured');
+    expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('unlocked');
+  });
+
+  it('refuses photo_confirmation rather than granting unverified progress (ST-6.1 pending)', async () => {
+    ctx = await buildTestApp(
+      seedState(
+        seedTrail({
+          pins: [
+            {
+              id: 'pin-1',
+              sequenceIndex: 1,
+              eastMeters: 0,
+              challengeType: 'photo_confirmation' as const,
+              challengeConfig: { prompt: 'Photograph the arch' },
+            },
+          ],
+        }),
+      ),
+    );
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+
+    const response = await completePin(ctx, { userId: PLAYER_A, attemptId, pinId: 'pin-1' });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toBe('challenge_type_not_implemented');
+    expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('unlocked');
+  });
+
+  it('ignores an answer sent for a proximity_dwell pin', async () => {
+    ctx = await buildTestApp(seedState(seedTrail(TWO_PIN_TRAIL)));
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+
+    const response = await completePin(ctx, {
+      userId: PLAYER_A,
+      attemptId,
+      pinId: 'pin-1',
+      challengeAnswer: 'irrelevant',
+    });
+
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('never ships the code to the client in the trail payload (ST-2.1)', async () => {
+    ctx = await buildTestApp(seedState(seedTrail(CODE_TRAIL)));
+
+    const trail = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/v1/trails/trail-1',
+      headers: ctx.authHeader(PLAYER_A),
+    });
+
+    expect(trail.body).not.toContain('SWAN42');
+    expect(trail.json().pins[0].challenge).toEqual({ hint: 'On the plaque' });
+  });
+});
+
 describe('POST /api/v1/pins/:pinId/report (ST-2.4, GDR-09)', () => {
   it('queues a report against the pin for Admin review', async () => {
     ctx = await buildTestApp(seedState(seedTrail(TWO_PIN_TRAIL)));

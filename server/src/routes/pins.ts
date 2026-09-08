@@ -6,6 +6,7 @@ import {
   evaluateSequence,
   isAttemptExpired,
 } from '../services/completion.js';
+import { verifyChallengeAnswer, type ChallengeFailure } from '../services/challengeVerification.js';
 import type { LocationHistoryEntry } from '../db/types.js';
 
 /**
@@ -46,6 +47,8 @@ const completeBodySchema = {
     /** SR-SEC-02 cold-start grace period is measured from app foreground, which only the client knows. */
     sessionStartedAt: { type: 'string', minLength: 1 },
     recentLocationHistory: { type: 'array', maxItems: 500, items: locationSampleSchema },
+    /** ST-6.2: the player's answer for a `code_entry` pin. Ignored by other challenge types. */
+    challengeAnswer: { type: 'string', maxLength: 200 },
   },
 } as const;
 
@@ -69,6 +72,20 @@ interface CompleteBody {
     accuracyM?: number;
     recordedAt: string;
   }>;
+  challengeAnswer?: string;
+}
+
+function challengeMessage(reason: ChallengeFailure): string {
+  switch (reason) {
+    case 'incorrect_code':
+      return "That code doesn't match — check the plaque and try again";
+    case 'challenge_answer_required':
+      return 'Enter the code shown at this location to complete the pin';
+    case 'challenge_not_configured':
+      return 'This pin has no code set yet — please report it';
+    case 'challenge_type_not_implemented':
+      return 'This challenge type is not available yet';
+  }
 }
 
 function parseDate(value: string | undefined): Date | null | undefined {
@@ -145,7 +162,24 @@ export async function pinRoutes(app: FastifyInstance): Promise<void> {
         });
       }
 
-      // 4. SR-SEC-02: run the sanity check over server-persisted history (client-submitted
+      // 4. ST-6.2: verify the challenge itself. This runs before any write, so a wrong answer
+      //    leaves no trace and can be retried immediately (GDR-10 unlimited retries, GDR-12
+      //    stateless attempts). Position is checked first so "move closer" wins over "wrong
+      //    code" — the player has to be at the pin either way.
+      const challenge = verifyChallengeAnswer(pin, body.challengeAnswer);
+      if (!challenge.ok) {
+        const status =
+          challenge.reason === 'incorrect_code' || challenge.reason === 'challenge_answer_required'
+            ? 422
+            : 409; // An unconfigured or unimplemented challenge is our fault, not the player's.
+        return reply.code(status).send({
+          error: challenge.reason,
+          challengeType: pin.challengeType,
+          message: challengeMessage(challenge.reason),
+        });
+      }
+
+      // 5. SR-SEC-02: run the sanity check over server-persisted history (client-submitted
       //    samples included, deduped by capture timestamp so a resubmitted overlap doesn't
       //    bloat the retention window in SR-PRIV-01).
       const lookbackStart = new Date(fixAt.getTime() - SANITY_LOOKBACK_SECONDS * 1000);
@@ -203,7 +237,7 @@ export async function pinRoutes(app: FastifyInstance): Promise<void> {
         );
       }
 
-      // 5. Mark complete, unlock the next pin, and close out the attempt if this was the last
+      // 6. Mark complete, unlock the next pin, and close out the attempt if this was the last
       //    one (GDR-04). Returns null if the pin stopped being `unlocked` between the read
       //    above and this write — i.e. a double-submit lost the race.
       const result = await app.store.completePin({

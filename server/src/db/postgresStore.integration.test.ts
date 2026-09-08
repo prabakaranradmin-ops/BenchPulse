@@ -462,6 +462,127 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
 
   // ST-8.3 — the aggregation runs in SQL, so these are the tests that actually prove it. The
   // fixture below has known outcomes and exact timestamps so every number is checkable by hand.
+  // ST-6.2 — the code lives in a JSONB column, so the round-trip through Postgres is the part
+  // unit tests can't prove: authored via the admin API, read back on completion, never leaked.
+  describe('code_entry verification end to end (ST-6.2)', () => {
+    let codeTrailId: string;
+    let codePinId: string;
+    let playerId: string;
+    let playerAuth: { authorization: string };
+    let attemptId: string;
+
+    beforeAll(async () => {
+      const admin = await tokenFor(randomBytes(24).toString('hex'));
+      await store.setUserRole(admin.userId, 'admin');
+      const adminAuth = { authorization: `Bearer ${admin.token}` };
+
+      const created = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/trails',
+        headers: adminAuth,
+        payload: { name: 'Code Trail' },
+      });
+      codeTrailId = created.json().trailId;
+
+      const published = await app.inject({
+        method: 'POST',
+        url: `/api/v1/admin/trails/${codeTrailId}/versions`,
+        headers: adminAuth,
+        payload: {
+          pins: [
+            {
+              sequenceIndex: 1,
+              lat: 0,
+              lng: 0,
+              radiusM: 10,
+              challengeType: 'code_entry',
+              challengeConfig: { code: 'SWAN42', hint: 'On the plaque' },
+            },
+          ],
+        },
+      });
+      codePinId = published.json().pins[0].pinId;
+
+      const player = await tokenFor(randomBytes(24).toString('hex'));
+      playerId = player.userId;
+      playerAuth = { authorization: `Bearer ${player.token}` };
+      const attempt = await app.inject({
+        method: 'POST',
+        url: '/api/v1/attempts',
+        headers: playerAuth,
+        payload: { trailId: codeTrailId },
+      });
+      attemptId = attempt.json().attemptId;
+    }, 30_000);
+
+    function complete(challengeAnswer?: string) {
+      return app.inject({
+        method: 'POST',
+        url: `/api/v1/attempts/${attemptId}/pins/${codePinId}/complete`,
+        headers: playerAuth,
+        payload: { lat: 0, lng: 0, accuracyM: 5, ...(challengeAnswer ? { challengeAnswer } : {}) },
+      });
+    }
+
+    async function locationRowsForPlayer() {
+      const { rows } = await fixtures.query(
+        'SELECT COUNT(*)::int AS n FROM location_history WHERE user_id = $1',
+        [playerId],
+      );
+      return rows[0].n as number;
+    }
+
+    it('stores the authored code in JSONB but never serves it to the client', async () => {
+      const stored = await fixtures.query('SELECT challenge_config FROM pins WHERE id = $1', [
+        codePinId,
+      ]);
+      expect(stored.rows[0].challenge_config).toEqual({ code: 'SWAN42', hint: 'On the plaque' });
+
+      const trail = await app.inject({
+        method: 'GET',
+        url: `/api/v1/trails/${codeTrailId}`,
+        headers: playerAuth,
+      });
+      expect(trail.body).not.toContain('SWAN42');
+      expect(trail.json().pins[0].challenge).toEqual({ hint: 'On the plaque' });
+    });
+
+    it('rejects a wrong code and writes nothing to the database (GDR-12)', async () => {
+      const before = await locationRowsForPlayer();
+
+      const response = await complete('SWAN43');
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json().error).toBe('incorrect_code');
+      const progress = await fixtures.query(
+        'SELECT status FROM pin_progress WHERE attempt_id = $1 AND pin_id = $2',
+        [attemptId, codePinId],
+      );
+      expect(progress.rows[0].status).toBe('unlocked');
+      expect(await locationRowsForPlayer()).toBe(before);
+    });
+
+    it('asks for a code when none is supplied', async () => {
+      const response = await complete();
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json().error).toBe('challenge_answer_required');
+    });
+
+    it('accepts the code read off the plaque in any reasonable form, and completes the pin', async () => {
+      // Retried after two failures above — GDR-10 allows unlimited attempts.
+      const response = await complete(' swan-42 ');
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ status: 'completed', attemptStatus: 'completed' });
+      const progress = await fixtures.query(
+        'SELECT status FROM pin_progress WHERE attempt_id = $1 AND pin_id = $2',
+        [attemptId, codePinId],
+      );
+      expect(progress.rows[0].status).toBe('completed');
+    });
+  });
+
   describe('analytics aggregation (SR-PRIV-03)', () => {
     const analyticsTrailId = randomUUID();
     const analyticsVersionId = randomUUID();

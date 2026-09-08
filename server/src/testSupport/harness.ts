@@ -78,6 +78,8 @@ export interface CompleteOptions {
   recordedAt?: Date;
   sessionStartedAt?: Date;
   recentLocationHistory?: Array<{ lat: number; lng: number; recordedAt: Date }>;
+  /** ST-6.2: the player's answer for a `code_entry` pin. */
+  challengeAnswer?: string;
 }
 
 /** POSTs a pin completion, defaulting the reported fix to the pin's own location. */
@@ -103,6 +105,9 @@ export function completePin(ctx: TestApp, options: CompleteOptions) {
               recordedAt: s.recordedAt.toISOString(),
             })),
           }
+        : {}),
+      ...(options.challengeAnswer !== undefined
+        ? { challengeAnswer: options.challengeAnswer }
         : {}),
     },
   });

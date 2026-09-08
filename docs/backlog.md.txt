@@ -97,8 +97,21 @@ now exchange a device key for a token, fetch a trail, start an attempt, and comp
 - **ST-5.2 — Distance-fade fallback** (SR-VIS-02): fill in `OcclusionFallbackController.ApplyDistanceFade` for devices without a usable depth signal.
 
 ## EPIC 6 — Additional Challenge Types
-- **ST-6.1 — `photo_confirmation`** (GDR-02, GDR-10 unlimited retries).
-- **ST-6.2 — `code_entry`** (GDR-02).
+- **ST-6.1 — `photo_confirmation`** (GDR-02, GDR-10 unlimited retries) — not started.
+  Needs photo storage plus the §6.4 moderation revisit ("the moment `photo_confirmation`
+  content becomes visible to anyone but its owner"). **Changed by ST-6.2:** a
+  `photo_confirmation` pin is now *refused* at completion with
+  `challenge_type_not_implemented` instead of silently completing on position alone —
+  unverified progress was the worse failure.
+- **ST-6.2 — `code_entry`** (GDR-02) ✅ DONE
+  `server/src/services/challengeVerification.ts`, wired into the completion route. The code is
+  checked server-side only; `pinDto` never ships it to the device.
+  Normalization `[ASSUMED — confirm or override]`: NFKC, case-insensitive, whitespace/underscore/
+  dash stripped — `SWAN42` = `swan 42` = `swan-42`, but not `SWAN042`.
+  Verification runs after the position check and before any write, so a wrong code leaves no
+  trace and can be retried immediately (GDR-10 unlimited retries, GDR-12 stateless attempts).
+  A code pin published without a code returns `challenge_not_configured` (409) rather than
+  letting anyone through — SR-ADMIN-01 already warns about this at publish time.
 
 ## EPIC 7 — Desktop Admin Authoring Tool
 *(Backend pulled forward: until this existed, a trail could only be created with raw SQL, which
