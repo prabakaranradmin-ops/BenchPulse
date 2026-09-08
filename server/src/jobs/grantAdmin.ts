@@ -8,7 +8,6 @@
 
 import 'dotenv/config';
 import { createPostgresStore } from '../db/postgresStore.js';
-import type { UserRole } from '../db/types.js';
 
 const [userId, roleArg = 'admin'] = process.argv.slice(2);
 
@@ -29,7 +28,7 @@ if (!databaseUrl) {
 
 const store = createPostgresStore(databaseUrl);
 try {
-  const user = await store.setUserRole(userId, roleArg as UserRole);
+  const user = await store.setUserRole(userId, roleArg);
   if (!user) {
     console.error(`No player with id ${userId}.`);
     process.exitCode = 1;

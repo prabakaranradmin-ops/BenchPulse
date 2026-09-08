@@ -8,7 +8,11 @@ import {
 
 const METERS_PER_DEGREE_LNG_AT_EQUATOR = 111320;
 
-function pin(sequenceIndex: number, eastMeters: number, overrides: Partial<DraftPin> = {}): DraftPin {
+function pin(
+  sequenceIndex: number,
+  eastMeters: number,
+  overrides: Partial<DraftPin> = {},
+): DraftPin {
   return {
     sequenceIndex,
     lat: 0,

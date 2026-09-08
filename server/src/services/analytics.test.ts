@@ -52,9 +52,9 @@ describe('summarizeTrail (SR-PRIV-03)', () => {
   });
 
   it('rounds a repeating rate rather than emitting float noise', () => {
-    expect(summarizeTrail(aggregate({ attemptsStarted: 7, attemptsCompleted: 2 })).completionRate).toBe(
-      0.2857,
-    );
+    expect(
+      summarizeTrail(aggregate({ attemptsStarted: 7, attemptsCompleted: 2 })).completionRate,
+    ).toBe(0.2857);
   });
 
   it('suppresses rates and timings for a cohort too small to be anonymous', () => {
@@ -140,11 +140,17 @@ describe('summarizeFunnel', () => {
 
 describe('parseAnalyticsRange', () => {
   it('accepts an open-ended range', () => {
-    expect(parseAnalyticsRange({})).toEqual({ ok: true, range: { from: undefined, to: undefined } });
+    expect(parseAnalyticsRange({})).toEqual({
+      ok: true,
+      range: { from: undefined, to: undefined },
+    });
   });
 
   it('parses ISO bounds', () => {
-    const result = parseAnalyticsRange({ from: '2026-01-01T00:00:00Z', to: '2026-02-01T00:00:00Z' });
+    const result = parseAnalyticsRange({
+      from: '2026-01-01T00:00:00Z',
+      to: '2026-02-01T00:00:00Z',
+    });
 
     expect(result).toMatchObject({ ok: true });
     if (result.ok) {
@@ -154,7 +160,10 @@ describe('parseAnalyticsRange', () => {
   });
 
   it('rejects unparseable bounds', () => {
-    expect(parseAnalyticsRange({ from: 'last tuesday' })).toEqual({ ok: false, error: 'invalid_from' });
+    expect(parseAnalyticsRange({ from: 'last tuesday' })).toEqual({
+      ok: false,
+      error: 'invalid_from',
+    });
     expect(parseAnalyticsRange({ to: '' })).toEqual({ ok: false, error: 'invalid_to' });
   });
 

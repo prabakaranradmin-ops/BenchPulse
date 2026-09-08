@@ -71,7 +71,10 @@ describe('GET /api/v1/trails/:trailId (ST-2.1, SR-NET-01)', () => {
   });
 
   it('404s an unpublished trail (no current_version_id)', async () => {
-    const trail = seedTrail({ published: false, pins: [{ id: 'pin-1', sequenceIndex: 1, eastMeters: 0 }] });
+    const trail = seedTrail({
+      published: false,
+      pins: [{ id: 'pin-1', sequenceIndex: 1, eastMeters: 0 }],
+    });
     ctx = await buildTestApp(seedState(trail));
 
     const response = await ctx.app.inject({

@@ -172,7 +172,12 @@ export function createMemoryStore(seed: Partial<MemoryState> = {}): MemoryStore 
       return attempt;
     },
 
-    async completePin({ attemptId, pinId, nextPinId, completedAt }): Promise<CompletePinResult | null> {
+    async completePin({
+      attemptId,
+      pinId,
+      nextPinId,
+      completedAt,
+    }): Promise<CompletePinResult | null> {
       const row = state.progress.find(
         (p) => p.attemptId === attemptId && p.pinId === pinId && p.status === 'unlocked',
       );
@@ -235,7 +240,9 @@ export function createMemoryStore(seed: Partial<MemoryState> = {}): MemoryStore 
 
     async publishTrailVersion({ trailId, pins }) {
       const versionNumber =
-        state.versions.filter((v) => v.trailId === trailId).reduce((max, v) => Math.max(max, v.versionNumber), 0) + 1;
+        state.versions
+          .filter((v) => v.trailId === trailId)
+          .reduce((max, v) => Math.max(max, v.versionNumber), 0) + 1;
       const version: TrailVersionRecord = {
         id: randomUUID(),
         trailId,
@@ -317,7 +324,9 @@ export function createMemoryStore(seed: Partial<MemoryState> = {}): MemoryStore 
             p90CompletionSeconds: percentileCont(durations, 0.9),
           };
         })
-        .sort((a, b) => b.attemptsStarted - a.attemptsStarted || a.trailName.localeCompare(b.trailName))
+        .sort(
+          (a, b) => b.attemptsStarted - a.attemptsStarted || a.trailName.localeCompare(b.trailName),
+        )
         .slice(0, limit);
     },
 

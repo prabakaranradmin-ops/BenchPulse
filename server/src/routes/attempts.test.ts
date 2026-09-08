@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { buildTestApp, completePin, seedState, seedTrail, type TestApp } from '../testSupport/harness.js';
+import {
+  buildTestApp,
+  completePin,
+  seedState,
+  seedTrail,
+  type TestApp,
+} from '../testSupport/harness.js';
 
 let ctx: TestApp | undefined;
 
@@ -68,7 +74,9 @@ describe('POST /api/v1/attempts (ST-2.2)', () => {
     const original = ctx.store.state.attempts.find((a) => a.id === first.attemptId);
     expect(original?.status).toBe('completed');
     expect(original?.completedAt).not.toBeNull();
-    const originalProgress = ctx.store.state.progress.filter((p) => p.attemptId === first.attemptId);
+    const originalProgress = ctx.store.state.progress.filter(
+      (p) => p.attemptId === first.attemptId,
+    );
     expect(originalProgress.map((p) => p.status)).toEqual(['completed', 'completed']);
   });
 
@@ -108,7 +116,9 @@ describe('POST /api/v1/attempts (ST-2.2)', () => {
 
   it('404s an unpublished or unknown trail', async () => {
     ctx = await buildTestApp(
-      seedState(seedTrail({ published: false, pins: [{ id: 'pin-1', sequenceIndex: 1, eastMeters: 0 }] })),
+      seedState(
+        seedTrail({ published: false, pins: [{ id: 'pin-1', sequenceIndex: 1, eastMeters: 0 }] }),
+      ),
     );
 
     expect((await startAttempt(ctx, PLAYER_A)).statusCode).toBe(404);

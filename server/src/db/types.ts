@@ -164,7 +164,11 @@ export interface TrailStore {
   getPin(pinId: string): Promise<PinRecord | null>;
 
   /** GDR-06: always inserts a new attempt (plus its `pin_progress` rows); never mutates an existing one. */
-  createAttempt(input: { userId: string; trailId: string; trailVersionId: string }): Promise<AttemptRecord>;
+  createAttempt(input: {
+    userId: string;
+    trailId: string;
+    trailVersionId: string;
+  }): Promise<AttemptRecord>;
   getAttempt(attemptId: string): Promise<AttemptRecord | null>;
   getAttemptPinStates(attemptId: string): Promise<AttemptPinState[]>;
   /** GDR-08: an attempt past its trail's validity window is marked expired, not deleted. */
@@ -187,12 +191,20 @@ export interface TrailStore {
   getRecentLocationHistory(userId: string, since: Date): Promise<LocationSample[]>;
 
   /** GDR-09: "can't find this pin" report queue. */
-  createPinReport(input: { pinId: string; userId: string; note: string | null }): Promise<PinReportRecord>;
+  createPinReport(input: {
+    pinId: string;
+    userId: string;
+    note: string | null;
+  }): Promise<PinReportRecord>;
 
   // --- Authoring (EPIC 7). Admin-only at the route layer; the store just does the writes. ---
 
   /** ST-7.2: creates the trail shell. Pins arrive with the first published version. */
-  createTrail(input: { name: string; createdBy: string; expiryDays: number | null }): Promise<TrailRecord>;
+  createTrail(input: {
+    name: string;
+    createdBy: string;
+    expiryDays: number | null;
+  }): Promise<TrailRecord>;
 
   /**
    * ST-7.2 / GDR-07: writes a new version with its pins and points the trail at it, in one

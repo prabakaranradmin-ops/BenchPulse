@@ -55,7 +55,10 @@ function toRad(deg: number): number {
 }
 
 /** Great-circle distance between two lat/lng points, in meters. */
-export function haversineMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+export function haversineMeters(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
   const dLat = toRad(b.lat - a.lat);
   const dLng = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
@@ -83,7 +86,10 @@ export function checkLocationSanity(
   const sorted = [...history].sort((a, b) => a.recordedAt.getTime() - b.recordedAt.getTime());
   const latest = sorted[sorted.length - 1];
 
-  if (latest.recordedAt.getTime() - sessionStartedAt.getTime() < opts.coldStartGraceSeconds * 1000) {
+  if (
+    latest.recordedAt.getTime() - sessionStartedAt.getTime() <
+    opts.coldStartGraceSeconds * 1000
+  ) {
     return { flagged: false, reason: 'cold_start_grace_period' };
   }
 
@@ -97,14 +103,18 @@ export function checkLocationSanity(
   let totalDistance = 0;
   let maxInstantaneousSpeed = 0;
   for (let i = 1; i < windowSamples.length; i++) {
-    const dtSeconds = (windowSamples[i].recordedAt.getTime() - windowSamples[i - 1].recordedAt.getTime()) / 1000;
+    const dtSeconds =
+      (windowSamples[i].recordedAt.getTime() - windowSamples[i - 1].recordedAt.getTime()) / 1000;
     if (dtSeconds <= 0) continue;
     const distance = haversineMeters(windowSamples[i - 1], windowSamples[i]);
     totalDistance += distance;
     maxInstantaneousSpeed = Math.max(maxInstantaneousSpeed, distance / dtSeconds);
   }
 
-  const totalTimeSeconds = (windowSamples[windowSamples.length - 1].recordedAt.getTime() - windowSamples[0].recordedAt.getTime()) / 1000;
+  const totalTimeSeconds =
+    (windowSamples[windowSamples.length - 1].recordedAt.getTime() -
+      windowSamples[0].recordedAt.getTime()) /
+    1000;
   if (totalTimeSeconds <= 0) {
     return { flagged: false, reason: 'insufficient_window_data' };
   }

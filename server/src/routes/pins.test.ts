@@ -181,7 +181,7 @@ describe('POST /api/v1/attempts/:attemptId/pins/:pinId/complete (ST-2.3)', () =>
     expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('unlocked');
   });
 
-  it('flags implausible movement but still grants the completion (SR-SEC-02 flag, don\'t block)', async () => {
+  it("flags implausible movement but still grants the completion (SR-SEC-02 flag, don't block)", async () => {
     // 35 m/s sustained across the full 30s window, ending on the pin.
     const speedMps = 35;
     const intervalSeconds = 5;
@@ -216,7 +216,9 @@ describe('POST /api/v1/attempts/:attemptId/pins/:pinId/complete (ST-2.3)', () =>
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json().locationFlag).toMatchObject({ reason: 'sustained_speed_exceeds_threshold' });
+    expect(response.json().locationFlag).toMatchObject({
+      reason: 'sustained_speed_exceeds_threshold',
+    });
     expect(response.json().locationFlag.avgSpeedMps).toBeCloseTo(35, 0);
     // Flagged, not blocked — progress still moves.
     expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('completed');
@@ -260,7 +262,9 @@ describe('POST /api/v1/attempts/:attemptId/pins/:pinId/complete (ST-2.3)', () =>
     });
 
     expect(response.statusCode).toBe(200);
-    expect(progressFor(ctx, attemptId, 'pin-1')?.completedAt?.toISOString()).toBe(capturedAt.toISOString());
+    expect(progressFor(ctx, attemptId, 'pin-1')?.completedAt?.toISOString()).toBe(
+      capturedAt.toISOString(),
+    );
     expect(ctx.store.state.locationHistory).toEqual([
       expect.objectContaining({ userId: PLAYER_A, recordedAt: capturedAt }),
     ]);

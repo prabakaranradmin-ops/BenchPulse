@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { buildTestApp, lngAtMeters, seedState, seedTrail, type TestApp } from '../testSupport/harness.js';
+import {
+  buildTestApp,
+  lngAtMeters,
+  seedState,
+  seedTrail,
+  type TestApp,
+} from '../testSupport/harness.js';
 
 let ctx: TestApp | undefined;
 
@@ -11,7 +17,11 @@ afterEach(async () => {
 const ADMIN = 'admin-1';
 const PLAYER = 'player-1';
 
-function draftPin(sequenceIndex: number, eastMeters: number, overrides: Record<string, unknown> = {}) {
+function draftPin(
+  sequenceIndex: number,
+  eastMeters: number,
+  overrides: Record<string, unknown> = {},
+) {
   return {
     sequenceIndex,
     lat: 0,
@@ -74,7 +84,9 @@ describe('POST /api/v1/admin/trails/:trailId/versions (ST-7.2, GDR-07)', () => {
 
     expect(response.statusCode).toBe(201);
     expect(response.json()).toMatchObject({ versionNumber: 1, warnings: [] });
-    expect(response.json().pins.map((p: { sequenceIndex: number }) => p.sequenceIndex)).toEqual([1, 2]);
+    expect(response.json().pins.map((p: { sequenceIndex: number }) => p.sequenceIndex)).toEqual([
+      1, 2,
+    ]);
 
     // A player can now fetch it through the normal read path.
     const asPlayer = await ctx.app.inject({
@@ -98,7 +110,11 @@ describe('POST /api/v1/admin/trails/:trailId/versions (ST-7.2, GDR-07)', () => {
     });
     const attemptId = attempt.json().attemptId;
 
-    const second = await publish(ctx, trailId, [draftPin(1, 0), draftPin(2, 400), draftPin(3, 800)]);
+    const second = await publish(ctx, trailId, [
+      draftPin(1, 0),
+      draftPin(2, 400),
+      draftPin(3, 800),
+    ]);
 
     expect(second.json().versionNumber).toBe(2);
     const resumed = await ctx.app.inject({
@@ -127,7 +143,9 @@ describe('POST /api/v1/admin/trails/:trailId/versions (ST-7.2, GDR-07)', () => {
     const response = await publish(ctx, trailId, [draftPin(1, 0), draftPin(2, 12)]);
 
     expect(response.statusCode).toBe(201);
-    expect(response.json().warnings.map((w: { code: string }) => w.code)).toEqual(['pins_too_close']);
+    expect(response.json().warnings.map((w: { code: string }) => w.code)).toEqual([
+      'pins_too_close',
+    ]);
     expect(ctx.store.state.trails[0].currentVersionId).not.toBeNull();
   });
 
@@ -273,9 +291,11 @@ describe('analytics endpoints (ST-8.3, SR-PRIV-03)', () => {
         userId: `player-${index + 1}`,
         trailId: 'trail-1',
         trailVersionId: 'version-1',
-        status: completed ? 'completed' : spec.status ?? 'active',
+        status: completed ? 'completed' : (spec.status ?? 'active'),
         startedAt,
-        completedAt: completed ? new Date(startedAt.getTime() + spec.completedSeconds! * 1000) : null,
+        completedAt: completed
+          ? new Date(startedAt.getTime() + spec.completedSeconds! * 1000)
+          : null,
       });
       app.store.state.progress.push(
         { attemptId, pinId: 'pin-1', status: 'completed', completedAt: startedAt },
@@ -404,7 +424,11 @@ describe('analytics endpoints (ST-8.3, SR-PRIV-03)', () => {
 describe('admin authorization (requirements §2)', () => {
   const adminRoutes = [
     { method: 'POST' as const, url: '/api/v1/admin/trails', payload: { name: 'Sneaky Trail' } },
-    { method: 'POST' as const, url: '/api/v1/admin/trails/trail-1/versions', payload: { pins: [draftPin(1, 0)] } },
+    {
+      method: 'POST' as const,
+      url: '/api/v1/admin/trails/trail-1/versions',
+      payload: { pins: [draftPin(1, 0)] },
+    },
     { method: 'GET' as const, url: '/api/v1/admin/pin-reports', payload: undefined },
     {
       method: 'PATCH' as const,
@@ -416,7 +440,9 @@ describe('admin authorization (requirements §2)', () => {
   ];
 
   it('403s a player on every authoring route — content is Admin-authored in v1', async () => {
-    ctx = await buildTestApp(seedState(seedTrail({ pins: [{ id: 'pin-1', sequenceIndex: 1, eastMeters: 0 }] })));
+    ctx = await buildTestApp(
+      seedState(seedTrail({ pins: [{ id: 'pin-1', sequenceIndex: 1, eastMeters: 0 }] })),
+    );
 
     for (const route of adminRoutes) {
       const response = await ctx.app.inject({
@@ -452,11 +478,15 @@ describe('admin authorization (requirements §2)', () => {
   it('403s a token whose admin rights were revoked, without waiting for it to expire', async () => {
     ctx = await buildTestApp();
     const header = ctx.adminHeader(ADMIN);
-    expect((await ctx.app.inject({
-      method: 'GET',
-      url: '/api/v1/admin/pin-reports',
-      headers: header,
-    })).statusCode).toBe(200);
+    expect(
+      (
+        await ctx.app.inject({
+          method: 'GET',
+          url: '/api/v1/admin/pin-reports',
+          headers: header,
+        })
+      ).statusCode,
+    ).toBe(200);
 
     await ctx.store.setUserRole(ADMIN, 'player');
 

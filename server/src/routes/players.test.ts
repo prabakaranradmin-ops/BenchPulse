@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { buildTestApp, completePin, seedState, seedTrail, type TestApp } from '../testSupport/harness.js';
+import {
+  buildTestApp,
+  completePin,
+  seedState,
+  seedTrail,
+  type TestApp,
+} from '../testSupport/harness.js';
 import { hashDeviceKey } from '../services/deviceKey.js';
 
 let ctx: TestApp | undefined;
@@ -111,7 +117,6 @@ describe('POST /api/v1/players/token (ST-2.6)', () => {
     // The attempt belongs to the player the token was minted for — not to whoever asked.
     expect(ctx.store.state.attempts[0].userId).toBe(userId);
   });
-
 });
 
 describe('DELETE /api/v1/players/me (ST-8.2, SR-PRIV-02)', () => {
@@ -148,7 +153,11 @@ describe('DELETE /api/v1/players/me (ST-8.2, SR-PRIV-02)', () => {
     const { userId, auth } = await playerWithProgress(ctx, DEVICE_KEY);
     expect(ctx.store.state.locationHistory.length).toBeGreaterThan(0);
 
-    const response = await ctx.app.inject({ method: 'DELETE', url: '/api/v1/players/me', headers: auth });
+    const response = await ctx.app.inject({
+      method: 'DELETE',
+      url: '/api/v1/players/me',
+      headers: auth,
+    });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({

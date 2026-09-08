@@ -92,7 +92,9 @@ export function completePin(ctx: TestApp, options: CompleteOptions) {
       lng: options.lng ?? pin?.lng ?? 0,
       accuracyM: options.accuracyM ?? 5,
       ...(options.recordedAt ? { recordedAt: options.recordedAt.toISOString() } : {}),
-      ...(options.sessionStartedAt ? { sessionStartedAt: options.sessionStartedAt.toISOString() } : {}),
+      ...(options.sessionStartedAt
+        ? { sessionStartedAt: options.sessionStartedAt.toISOString() }
+        : {}),
       ...(options.recentLocationHistory
         ? {
             recentLocationHistory: options.recentLocationHistory.map((s) => ({

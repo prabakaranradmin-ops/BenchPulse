@@ -61,7 +61,10 @@ export function validateTrailDraft(pins: DraftPin[]): TrailValidationResult {
   const warnings: ValidationIssue[] = [];
 
   if (pins.length === 0) {
-    return { errors: [{ code: 'no_pins', message: 'A trail version needs at least one pin.' }], warnings };
+    return {
+      errors: [{ code: 'no_pins', message: 'A trail version needs at least one pin.' }],
+      warnings,
+    };
   }
 
   const ordered = [...pins].sort((a, b) => a.sequenceIndex - b.sequenceIndex);
@@ -124,7 +127,8 @@ export function validateTrailDraft(pins: DraftPin[]): TrailValidationResult {
     const previous = ordered[i - 1];
     const current = ordered[i];
     if (!isValidLatitude(current.lat) || !isValidLatitude(previous.lat)) continue;
-    const minimumSpacing = MIN_SPACING_RADIUS_MULTIPLIER * Math.min(previous.radiusM, current.radiusM);
+    const minimumSpacing =
+      MIN_SPACING_RADIUS_MULTIPLIER * Math.min(previous.radiusM, current.radiusM);
     const distance = haversineMeters(previous, current);
     if (distance < minimumSpacing) {
       warnings.push({

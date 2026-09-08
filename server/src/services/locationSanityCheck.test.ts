@@ -47,7 +47,12 @@ describe('checkLocationSanity (SR-SEC-02)', () => {
   it('flags a sustained 35 m/s average held across the full 30s window', () => {
     const anchor = new Date('2026-01-01T00:05:00Z');
     const sessionStartedAt = new Date(anchor.getTime() - 120_000); // well outside grace period
-    const samples = buildStraightLineSamples({ startAt: anchor, count: 7, intervalSeconds: 5, speedMps: 35 });
+    const samples = buildStraightLineSamples({
+      startAt: anchor,
+      count: 7,
+      intervalSeconds: 5,
+      speedMps: 35,
+    });
 
     const result = checkLocationSanity(samples, sessionStartedAt);
 
@@ -59,7 +64,12 @@ describe('checkLocationSanity (SR-SEC-02)', () => {
   it('does not flag a normal walking pace (~1.4 m/s)', () => {
     const anchor = new Date('2026-01-01T00:05:00Z');
     const sessionStartedAt = new Date(anchor.getTime() - 120_000);
-    const samples = buildStraightLineSamples({ startAt: anchor, count: 7, intervalSeconds: 5, speedMps: 1.4 });
+    const samples = buildStraightLineSamples({
+      startAt: anchor,
+      count: 7,
+      intervalSeconds: 5,
+      speedMps: 1.4,
+    });
 
     const result = checkLocationSanity(samples, sessionStartedAt);
 
@@ -71,7 +81,12 @@ describe('checkLocationSanity (SR-SEC-02)', () => {
     const anchor = new Date('2026-01-01T00:05:00Z');
     const sessionStartedAt = new Date(anchor.getTime() - 120_000);
     // Only two samples in the window: 40 m/s over 1s — a spike, not a sustained pattern.
-    const samples = buildStraightLineSamples({ startAt: anchor, count: 2, intervalSeconds: 1, speedMps: 40 });
+    const samples = buildStraightLineSamples({
+      startAt: anchor,
+      count: 2,
+      intervalSeconds: 1,
+      speedMps: 40,
+    });
 
     const result = checkLocationSanity(samples, sessionStartedAt);
 
@@ -83,7 +98,12 @@ describe('checkLocationSanity (SR-SEC-02)', () => {
     const anchor = new Date('2026-01-01T00:05:00Z');
     const sessionStartedAt = new Date(anchor.getTime() - 120_000);
     // Two samples, 50 m/s — above the 45 m/s allowance even with too little data to call it "sustained".
-    const samples = buildStraightLineSamples({ startAt: anchor, count: 2, intervalSeconds: 1, speedMps: 50 });
+    const samples = buildStraightLineSamples({
+      startAt: anchor,
+      count: 2,
+      intervalSeconds: 1,
+      speedMps: 50,
+    });
 
     const result = checkLocationSanity(samples, sessionStartedAt);
 

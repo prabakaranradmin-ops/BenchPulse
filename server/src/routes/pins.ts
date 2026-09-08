@@ -1,7 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { authenticate, userIdOf } from '../plugins/auth.js';
 import { checkLocationSanity, type LocationSample } from '../services/locationSanityCheck.js';
-import { evaluateCompletionPosition, evaluateSequence, isAttemptExpired } from '../services/completion.js';
+import {
+  evaluateCompletionPosition,
+  evaluateSequence,
+  isAttemptExpired,
+} from '../services/completion.js';
 import type { LocationHistoryEntry } from '../db/types.js';
 
 /**
@@ -59,7 +63,12 @@ interface CompleteBody {
   accuracyM: number;
   recordedAt?: string;
   sessionStartedAt?: string;
-  recentLocationHistory?: Array<{ lat: number; lng: number; accuracyM?: number; recordedAt: string }>;
+  recentLocationHistory?: Array<{
+    lat: number;
+    lng: number;
+    accuracyM?: number;
+    recordedAt: string;
+  }>;
 }
 
 function parseDate(value: string | undefined): Date | null | undefined {
@@ -97,7 +106,9 @@ export async function pinRoutes(app: FastifyInstance): Promise<void> {
       const trail = await app.store.getTrail(attempt.trailId);
       if (isAttemptExpired(attempt, trail?.expiryDays ?? null, fixAt)) {
         const expired = await app.store.markAttemptExpired(attempt.id);
-        return reply.code(409).send({ error: 'attempt_expired', attemptStatus: expired?.status ?? 'expired' });
+        return reply
+          .code(409)
+          .send({ error: 'attempt_expired', attemptStatus: expired?.status ?? 'expired' });
       }
       if (attempt.status !== 'active') {
         return reply.code(409).send({ error: 'attempt_not_active', attemptStatus: attempt.status });
@@ -147,10 +158,20 @@ export async function pinRoutes(app: FastifyInstance): Promise<void> {
         if (!at) return reply.code(400).send({ error: 'invalid_timestamp' });
         if (at.getTime() < lookbackStart.getTime() || storedTimes.has(at.getTime())) continue;
         storedTimes.add(at.getTime());
-        submitted.push({ lat: sample.lat, lng: sample.lng, accuracyM: sample.accuracyM ?? null, recordedAt: at });
+        submitted.push({
+          lat: sample.lat,
+          lng: sample.lng,
+          accuracyM: sample.accuracyM ?? null,
+          recordedAt: at,
+        });
       }
       if (!storedTimes.has(fixAt.getTime())) {
-        submitted.push({ lat: body.lat, lng: body.lng, accuracyM: body.accuracyM, recordedAt: fixAt });
+        submitted.push({
+          lat: body.lat,
+          lng: body.lng,
+          accuracyM: body.accuracyM,
+          recordedAt: fixAt,
+        });
       }
       await app.store.appendLocationHistory(userId, submitted);
 

@@ -1,0 +1,6 @@
+dist/
+node_modules/
+coverage/
+package-lock.json
+# SQL migrations are hand-aligned for readability; Prettier has no SQL parser anyway.
+migrations/

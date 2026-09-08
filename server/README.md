@@ -51,26 +51,26 @@ Every `/api/v1` route except the token exchange requires `Authorization: Bearer 
 with `JWT_SECRET`, whose `sub` claim is the player's `users.id`. SR-DATA-01/02: the user id
 comes only from the verified token — no route accepts a user id from a body, query, or path.
 
-| Route | Requirements | Notes |
-| --- | --- | --- |
-| `POST /api/v1/players/token` | ST-2.6 | The only unauthenticated route. Body `{ deviceKey }` → `{ userId, token, expiresInSeconds }`. Find-or-create, so a repeat exchange returns the same player. |
-| `GET /api/v1/trails/:trailId` | SR-NET-01, ST-2.1 | Current published version's pins, ordered by `sequence_index`. This is the payload the client caches for offline browsing. 404 if the trail is unpublished (`current_version_id IS NULL`) or missing. |
-| `POST /api/v1/attempts` | GDR-06, GDR-07, ST-2.2 | Body `{ trailId }`. Always creates a new attempt (replay never overwrites history) and snapshots the trail version, so a later Admin edit can't move a player's pins mid-trail. Seeds `pin_progress`: lowest `sequence_index` `unlocked`, the rest `locked`. |
-| `GET /api/v1/attempts/:attemptId` | CR-02, GDR-08 | Resume path after a restart — returns `currentPinId` plus every pin's status. Marks the attempt `expired` on read if it is past its trail's validity window. |
-| `POST /api/v1/attempts/:attemptId/pins/:pinId/complete` | GDR-01, GDR-04, SR-GEO-04, SR-SEC-02, ST-2.3 | See below. |
-| `POST /api/v1/pins/:pinId/report` | GDR-09, ST-2.4 | Body `{ note? }`. Queues a "can't find this pin" report for the Admin dashboard. No dedup in v1. |
-| `DELETE /api/v1/players/me` | SR-PRIV-02, ST-8.2 | Deletes the caller's location history, progress, attempts, and player row. Pin reports survive with a null reporter — they're an Admin work item about a place, not personal data. |
+| Route                                                   | Requirements                                 | Notes                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /api/v1/players/token`                            | ST-2.6                                       | The only unauthenticated route. Body `{ deviceKey }` → `{ userId, token, expiresInSeconds }`. Find-or-create, so a repeat exchange returns the same player.                                                                                                  |
+| `GET /api/v1/trails/:trailId`                           | SR-NET-01, ST-2.1                            | Current published version's pins, ordered by `sequence_index`. This is the payload the client caches for offline browsing. 404 if the trail is unpublished (`current_version_id IS NULL`) or missing.                                                        |
+| `POST /api/v1/attempts`                                 | GDR-06, GDR-07, ST-2.2                       | Body `{ trailId }`. Always creates a new attempt (replay never overwrites history) and snapshots the trail version, so a later Admin edit can't move a player's pins mid-trail. Seeds `pin_progress`: lowest `sequence_index` `unlocked`, the rest `locked`. |
+| `GET /api/v1/attempts/:attemptId`                       | CR-02, GDR-08                                | Resume path after a restart — returns `currentPinId` plus every pin's status. Marks the attempt `expired` on read if it is past its trail's validity window.                                                                                                 |
+| `POST /api/v1/attempts/:attemptId/pins/:pinId/complete` | GDR-01, GDR-04, SR-GEO-04, SR-SEC-02, ST-2.3 | See below.                                                                                                                                                                                                                                                   |
+| `POST /api/v1/pins/:pinId/report`                       | GDR-09, ST-2.4                               | Body `{ note? }`. Queues a "can't find this pin" report for the Admin dashboard. No dedup in v1.                                                                                                                                                             |
+| `DELETE /api/v1/players/me`                             | SR-PRIV-02, ST-8.2                           | Deletes the caller's location history, progress, attempts, and player row. Pin reports survive with a null reporter — they're an Admin work item about a place, not personal data.                                                                           |
 
 ### Authoring API — Admin only (EPIC 7)
 
-| Route | Requirements | Notes |
-| --- | --- | --- |
-| `POST /api/v1/admin/trails` | ST-7.2 | Body `{ name, expiryDays? }` → an unpublished trail shell. |
+| Route                                         | Requirements                   | Notes                                                                                                                                                              |
+| --------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /api/v1/admin/trails`                   | ST-7.2                         | Body `{ name, expiryDays? }` → an unpublished trail shell.                                                                                                         |
 | `POST /api/v1/admin/trails/:trailId/versions` | ST-7.2, GDR-07, SR-ADMIN-01/02 | Body `{ pins: [...] }`. Writes a new version, its pins, and moves `current_version_id` — in one transaction. Anyone mid-attempt keeps the version they started on. |
-| `GET /api/v1/admin/pin-reports` | ST-7.3, GDR-09 | `?status=open|reviewed|resolved`, `?limit=` (default 50). Newest first, and never includes who filed a report. |
-| `PATCH /api/v1/admin/pin-reports/:reportId` | ST-7.3 | Body `{ status }` — move a report through triage. |
-| `GET /api/v1/admin/analytics/trails` | ST-8.3, SR-PRIV-03 | Aggregates per trail, busiest first. `?from=`/`?to=` ISO bounds, `?limit=` (default 50). |
-| `GET /api/v1/admin/analytics/trails/:trailId` | ST-8.3, SR-PRIV-03 | One trail's aggregates plus a per-pin drop-off funnel. |
+| `GET /api/v1/admin/pin-reports`               | ST-7.3, GDR-09                 | `?status=open                                                                                                                                                      | reviewed | resolved`, `?limit=` (default 50). Newest first, and never includes who filed a report. |
+| `PATCH /api/v1/admin/pin-reports/:reportId`   | ST-7.3                         | Body `{ status }` — move a report through triage.                                                                                                                  |
+| `GET /api/v1/admin/analytics/trails`          | ST-8.3, SR-PRIV-03             | Aggregates per trail, busiest first. `?from=`/`?to=` ISO bounds, `?limit=` (default 50).                                                                           |
+| `GET /api/v1/admin/analytics/trails/:trailId` | ST-8.3, SR-PRIV-03             | One trail's aggregates plus a per-pin drop-off funnel.                                                                                                             |
 
 ### Analytics (ST-8.3)
 
@@ -85,14 +85,14 @@ Three properties worth knowing:
   `pin_progress`, which hold no coordinates, so analytics is unaffected by the SR-PRIV-01 purge —
   there's a DB-backed test that purges every location row and asserts the response is byte-identical.
 - **Small cohorts are suppressed.** Below `MIN_COHORT_SIZE` attempts `[ASSUMED: 5 — confirm or
-  override]`, rates and timings come back `null` with `suppressed: true`; a completion rate over
-  one attempt is a single player's outcome with a percent sign on it. Attempt *counts* are still
+override]`, rates and timings come back `null` with `suppressed: true`; a completion rate over
+  one attempt is a single player's outcome with a percent sign on it. Attempt _counts_ are still
   reported — they describe the trail, not a player.
 - **`from` is inclusive, `to` is exclusive**, so week-by-week queries tile without
   double-counting an attempt that started exactly on a boundary. A window with no attempts
   returns zeros rather than a 404, so a caller doesn't have to special-case quiet weeks.
 
-Drop-off is measured against the players who *reached* each pin, not everyone who started —
+Drop-off is measured against the players who _reached_ each pin, not everyone who started —
 otherwise every later pin looks like a cliff. The funnel groups by `sequence_index` across a
 trail's versions, since drop-off is a property of the trail and pins change identity when the
 Admin republishes (GDR-07).
@@ -118,7 +118,7 @@ and the `users` table carries no credential columns to suggest otherwise. The cl
 expires. Only the SHA-256 hash of the key is stored, so a database leak doesn't hand over
 playable identities.
 
-The consequence to weigh before this ships: the device key *is* the account. Losing it loses
+The consequence to weigh before this ships: the device key _is_ the account. Losing it loses
 progress, and there is no recovery path or cross-device sync until real sign-in exists. Adding
 that later is a migration on the same `users` row, not a rewrite of progress ownership.
 
@@ -129,20 +129,20 @@ anyway gets a clean `401 player_not_found` from attempt creation rather than a d
 ### Completion endpoint
 
 Body: `{ lat, lng, accuracyM, recordedAt?, sessionStartedAt?, recentLocationHistory? }`.
-`recordedAt` is the device's *capture* time, not submission time — an offline completion queued
+`recordedAt` is the device's _capture_ time, not submission time — an offline completion queued
 per SR-NET-02 submits with its original timestamp, and that is what gets persisted.
 
 Rejections are distinguishable so the client can show the right hint:
 
-| Status | `error` | Meaning |
-| --- | --- | --- |
-| 404 | `attempt_not_found` | Missing, or belongs to another player — deliberately not 403, so attempt ids aren't probeable (SR-DATA-02). |
-| 404 | `pin_not_in_attempt` | Pin isn't part of this attempt's trail version. |
-| 409 | `pin_locked` | Skipping ahead; finish the current pin first (GDR-01). |
-| 409 | `pin_already_completed` | Also returned when a concurrent double-submit loses the write-time race. |
-| 409 | `attempt_expired` / `attempt_not_active` | GDR-08. |
-| 422 | `accuracy_exceeds_ceiling` | Accuracy above the 50m ceiling — client shows "GPS signal weak — move to open sky" (SR-GEO-04). |
-| 422 | `outside_effective_radius` | Response carries `distanceM` and `effectiveRadiusM` for a "move closer" hint. |
+| Status | `error`                                  | Meaning                                                                                                     |
+| ------ | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 404    | `attempt_not_found`                      | Missing, or belongs to another player — deliberately not 403, so attempt ids aren't probeable (SR-DATA-02). |
+| 404    | `pin_not_in_attempt`                     | Pin isn't part of this attempt's trail version.                                                             |
+| 409    | `pin_locked`                             | Skipping ahead; finish the current pin first (GDR-01).                                                      |
+| 409    | `pin_already_completed`                  | Also returned when a concurrent double-submit loses the write-time race.                                    |
+| 409    | `attempt_expired` / `attempt_not_active` | GDR-08.                                                                                                     |
+| 422    | `accuracy_exceeds_ceiling`               | Accuracy above the 50m ceiling — client shows "GPS signal weak — move to open sky" (SR-GEO-04).             |
+| 422    | `outside_effective_radius`               | Response carries `distanceM` and `effectiveRadiusM` for a "move closer" hint.                               |
 
 On success the response includes `nextPinId` (null on the final pin), `attemptStatus`
 (`completed` when the last pin lands, GDR-04), and `locationFlag` — non-null when SR-SEC-02
@@ -157,7 +157,7 @@ flag is logged with the `SR-SEC-02` requirement tag for review.
   rule, the GDR-01 sequence rule, and the GDR-08 expiry rule, all as pure functions.
 - `migrations/` — the schema for trails/versions/pins/attempts/progress/location history/pin
   reports, matching SR-DATA-01/02, GDR-06/07/08, SR-PRIV-01, GDR-09, applied by `npm run
-  migrate`.
+migrate`.
 - `src/jobs/purgeLocationHistory.ts` — **implemented and tested** (SR-PRIV-01): the retention
   purge, below.
 - `src/routes/*` — **implemented and tested** (ST-2.1–2.5). Route handlers depend on the

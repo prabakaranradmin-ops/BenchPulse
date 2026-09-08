@@ -105,7 +105,10 @@ describe('evaluateSequence (GDR-01)', () => {
   });
 
   it('rejects re-completing a finished pin', () => {
-    expect(evaluateSequence(states, 'pin-1')).toEqual({ ok: false, reason: 'pin_already_completed' });
+    expect(evaluateSequence(states, 'pin-1')).toEqual({
+      ok: false,
+      reason: 'pin_already_completed',
+    });
   });
 
   it('rejects a pin that is not part of the attempt at all', () => {

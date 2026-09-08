@@ -14,7 +14,9 @@ if (!jwtSecret) {
   process.exit(1);
 }
 if (jwtSecret === 'change-me' && process.env.NODE_ENV === 'production') {
-  console.error('JWT_SECRET is still the .env.example placeholder; refusing to start in production.');
+  console.error(
+    'JWT_SECRET is still the .env.example placeholder; refusing to start in production.',
+  );
   process.exit(1);
 }
 
@@ -26,8 +28,16 @@ const app = await buildApp({
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
-    // Closing the app runs the onClose hook, which releases the pg pool.
-    app.close().then(() => process.exit(0));
+    // Closing the app runs the onClose hook, which releases the pg pool. A failure to close
+    // cleanly still has to terminate the process — and say why, rather than hanging on an
+    // unhandled rejection.
+    app.close().then(
+      () => process.exit(0),
+      (err: unknown) => {
+        app.log.error(err);
+        process.exit(1);
+      },
+    );
   });
 }
 

@@ -33,7 +33,10 @@ describe('toClientPin (ST-2.1)', () => {
 
   it('never ships a code_entry answer to the device', () => {
     const serialized = toClientPin(
-      pin({ challengeType: 'code_entry', challengeConfig: { code: 'SWAN42', hint: 'On the plaque' } }),
+      pin({
+        challengeType: 'code_entry',
+        challengeConfig: { code: 'SWAN42', hint: 'On the plaque' },
+      }),
     );
 
     expect(serialized.challenge).toEqual({ hint: 'On the plaque' });

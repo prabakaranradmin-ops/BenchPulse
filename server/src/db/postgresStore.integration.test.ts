@@ -68,17 +68,30 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
 
     await runner(migrationOptions('up'));
 
-    await fixtures.query('INSERT INTO trails (id, name) VALUES ($1, $2)', [trailId, 'Integration Trail']);
+    await fixtures.query('INSERT INTO trails (id, name) VALUES ($1, $2)', [
+      trailId,
+      'Integration Trail',
+    ]);
     await fixtures.query(
       'INSERT INTO trail_versions (id, trail_id, version_number) VALUES ($1, $2, 1)',
       [versionId, trailId],
     );
-    await fixtures.query('UPDATE trails SET current_version_id = $1 WHERE id = $2', [versionId, trailId]);
+    await fixtures.query('UPDATE trails SET current_version_id = $1 WHERE id = $2', [
+      versionId,
+      trailId,
+    ]);
     for (const [index, pin] of [PIN_1, PIN_2].entries()) {
       await fixtures.query(
         `INSERT INTO pins (id, trail_version_id, sequence_index, lat, lng, radius_m, challenge_type, challenge_config)
          VALUES ($1, $2, $3, $4, $5, 10, 'proximity_dwell', $6)`,
-        [pin.id, versionId, index + 1, pin.lat, pin.lng, JSON.stringify({ dwell_seconds: 15, code: 'SECRET' })],
+        [
+          pin.id,
+          versionId,
+          index + 1,
+          pin.lat,
+          pin.lng,
+          JSON.stringify({ dwell_seconds: 15, code: 'SECRET' }),
+        ],
       );
     }
 
@@ -122,10 +135,9 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
   });
 
   it('populates the generated geography column from lat/lng', async () => {
-    const { rows } = await fixtures.query(
-      'SELECT ST_AsText(geom) AS wkt FROM pins WHERE id = $1',
-      [PIN_2.id],
-    );
+    const { rows } = await fixtures.query('SELECT ST_AsText(geom) AS wkt FROM pins WHERE id = $1', [
+      PIN_2.id,
+    ]);
 
     expect(rows[0].wkt).toMatch(/^POINT\(/);
   });
@@ -138,7 +150,11 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
     const users = await fixtures.query('SELECT id FROM users WHERE id = $1', [userId]);
     expect(users.rowCount).toBe(1);
 
-    const trail = await app.inject({ method: 'GET', url: `/api/v1/trails/${trailId}`, headers: auth });
+    const trail = await app.inject({
+      method: 'GET',
+      url: `/api/v1/trails/${trailId}`,
+      headers: auth,
+    });
     expect(trail.statusCode).toBe(200);
     expect(trail.json().pins.map((p: { pinId: string }) => p.pinId)).toEqual([PIN_1.id, PIN_2.id]);
     // ST-2.1: the authored answer stays server-side even when it's really in the database.
@@ -152,7 +168,10 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
     });
     expect(created.statusCode).toBe(201);
     const attemptId = created.json().attemptId;
-    expect(created.json().pins.map((p: { status: string }) => p.status)).toEqual(['unlocked', 'locked']);
+    expect(created.json().pins.map((p: { status: string }) => p.status)).toEqual([
+      'unlocked',
+      'locked',
+    ]);
 
     const first = await app.inject({
       method: 'POST',
@@ -179,16 +198,18 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
       [attemptId],
     );
     expect(progress.rows.map((r) => r.status)).toEqual(['completed', 'completed']);
-    const attempt = await fixtures.query('SELECT status, completed_at FROM trail_attempts WHERE id = $1', [
-      attemptId,
-    ]);
+    const attempt = await fixtures.query(
+      'SELECT status, completed_at FROM trail_attempts WHERE id = $1',
+      [attemptId],
+    );
     expect(attempt.rows[0].status).toBe('completed');
     expect(attempt.rows[0].completed_at).not.toBeNull();
 
     // SR-SEC-02 input persisted at capture time (SR-NET-02).
-    const history = await fixtures.query('SELECT COUNT(*)::int AS n FROM location_history WHERE user_id = $1', [
-      userId,
-    ]);
+    const history = await fixtures.query(
+      'SELECT COUNT(*)::int AS n FROM location_history WHERE user_id = $1',
+      [userId],
+    );
     expect(history.rows[0].n).toBe(2);
   });
 
@@ -204,7 +225,10 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
     });
 
     expect(replay.statusCode).toBe(201);
-    expect(replay.json().pins.map((p: { status: string }) => p.status)).toEqual(['unlocked', 'locked']);
+    expect(replay.json().pins.map((p: { status: string }) => p.status)).toEqual([
+      'unlocked',
+      'locked',
+    ]);
     const attempts = await fixtures.query('SELECT status FROM trail_attempts ORDER BY started_at');
     expect(attempts.rows.map((r) => r.status)).toEqual(['completed', 'active']);
   });
@@ -256,7 +280,11 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
     });
     const reportId = report.json().reportId;
 
-    const deletion = await app.inject({ method: 'DELETE', url: '/api/v1/players/me', headers: auth });
+    const deletion = await app.inject({
+      method: 'DELETE',
+      url: '/api/v1/players/me',
+      headers: auth,
+    });
 
     expect(deletion.statusCode).toBe(200);
     expect(deletion.json().deleted).toMatchObject({ attempts: 1, player: true });
@@ -278,9 +306,10 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
     );
     expect(orphanProgress.rows[0].n).toBe(0);
     // The report survives with no reporter — ON DELETE SET NULL.
-    const kept = await fixtures.query('SELECT reported_by_user_id, note FROM pin_reports WHERE id = $1', [
-      reportId,
-    ]);
+    const kept = await fixtures.query(
+      'SELECT reported_by_user_id, note FROM pin_reports WHERE id = $1',
+      [reportId],
+    );
     expect(kept.rows[0]).toEqual({ reported_by_user_id: null, note: 'Bollard removed' });
   });
 
@@ -362,9 +391,10 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
     expect(v2.json().versionNumber).toBe(2);
 
     // The trail points at v2; v1's pins survive untouched for anyone mid-attempt (GDR-07).
-    const trailRow = await fixtures.query('SELECT current_version_id, created_by FROM trails WHERE id = $1', [
-      authoredTrailId,
-    ]);
+    const trailRow = await fixtures.query(
+      'SELECT current_version_id, created_by FROM trails WHERE id = $1',
+      [authoredTrailId],
+    );
     expect(trailRow.rows[0]).toEqual({
       current_version_id: v2.json().trailVersionId,
       created_by: userId,
@@ -390,7 +420,11 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
     await store.setUserRole(userId, 'admin');
     const auth = { authorization: `Bearer ${token}` };
 
-    const open = await app.inject({ method: 'GET', url: '/api/v1/admin/pin-reports?status=open', headers: auth });
+    const open = await app.inject({
+      method: 'GET',
+      url: '/api/v1/admin/pin-reports?status=open',
+      headers: auth,
+    });
     expect(open.statusCode).toBe(200);
     const reports = open.json().reports;
     expect(reports.length).toBeGreaterThanOrEqual(1);
@@ -451,7 +485,14 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
       const attempt = await fixtures.query(
         `INSERT INTO trail_attempts (user_id, trail_id, trail_version_id, status, started_at, completed_at)
          VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [user.rows[0].id, analyticsTrailId, analyticsVersionId, spec.status, spec.startedAt, completedAt],
+        [
+          user.rows[0].id,
+          analyticsTrailId,
+          analyticsVersionId,
+          spec.status,
+          spec.startedAt,
+          completedAt,
+        ],
       );
       for (const [index, status] of spec.progress.entries()) {
         await fixtures.query(
@@ -460,7 +501,7 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
             attempt.rows[0].id,
             analyticsPinIds[index],
             status,
-            status === 'completed' ? completedAt ?? spec.startedAt : null,
+            status === 'completed' ? (completedAt ?? spec.startedAt) : null,
           ],
         );
       }
@@ -633,7 +674,11 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toMatchObject({ attemptsStarted: 0, completionRate: null, funnel: [] });
+      expect(response.json()).toMatchObject({
+        attemptsStarted: 0,
+        completionRate: null,
+        funnel: [],
+      });
     });
 
     it('includes the trail in the cross-trail listing, ordered by attempts', async () => {

@@ -23,6 +23,9 @@ import type { LocationSample } from '../services/locationSanityCheck.js';
 
 const { Pool } = pg;
 
+// `pg` hands back untyped rows; the mappers below are the single place where that shapelessness
+// is converted into the typed records the rest of the code works with.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
 function toTrail(row: Row): TrailRecord {
@@ -134,8 +137,12 @@ export function createPostgresStore(
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        const history = await client.query('DELETE FROM location_history WHERE user_id = $1', [userId]);
-        const attempts = await client.query('DELETE FROM trail_attempts WHERE user_id = $1', [userId]);
+        const history = await client.query('DELETE FROM location_history WHERE user_id = $1', [
+          userId,
+        ]);
+        const attempts = await client.query('DELETE FROM trail_attempts WHERE user_id = $1', [
+          userId,
+        ]);
         const user = await client.query('DELETE FROM users WHERE id = $1', [userId]);
         await client.query('COMMIT');
         return {
@@ -164,7 +171,9 @@ export function createPostgresStore(
     },
 
     async getTrailVersion(trailVersionId) {
-      const { rows } = await pool.query('SELECT * FROM trail_versions WHERE id = $1', [trailVersionId]);
+      const { rows } = await pool.query('SELECT * FROM trail_versions WHERE id = $1', [
+        trailVersionId,
+      ]);
       return rows[0] ? toTrailVersion(rows[0]) : null;
     },
 
@@ -247,7 +256,12 @@ export function createPostgresStore(
       return rows[0] ? toAttempt(rows[0]) : null;
     },
 
-    async completePin({ attemptId, pinId, nextPinId, completedAt }): Promise<CompletePinResult | null> {
+    async completePin({
+      attemptId,
+      pinId,
+      nextPinId,
+      completedAt,
+    }): Promise<CompletePinResult | null> {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
