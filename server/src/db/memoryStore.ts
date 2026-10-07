@@ -19,6 +19,7 @@ import type {
 } from './types.js';
 import type { LocationSample } from '../services/locationSanityCheck.js';
 import { percentileCont } from '../services/analytics.js';
+import { generateJoinCode } from '../services/joinCode.js';
 
 export interface ProgressRow {
   attemptId: string;
@@ -57,6 +58,14 @@ export function createMemoryStore(seed: Partial<MemoryState> = {}): MemoryStore 
     progress: seed.progress ?? [],
     locationHistory: seed.locationHistory ?? [],
     pinReports: seed.pinReports ?? [],
+  };
+
+  // Mirrors the UNIQUE constraint on trails.join_code.
+  const uniqueJoinCode = (): string => {
+    for (;;) {
+      const code = generateJoinCode();
+      if (!state.trails.some((t) => t.joinCode === code)) return code;
+    }
   };
 
   return {
@@ -233,9 +242,63 @@ export function createMemoryStore(seed: Partial<MemoryState> = {}): MemoryStore 
         expiryDays,
         currentVersionId: null,
         createdBy,
+        joinCode: uniqueJoinCode(),
+        createdAt: new Date(),
       };
       state.trails.push(trail);
       return trail;
+    },
+
+    async getTrailByJoinCode(joinCode) {
+      return state.trails.find((t) => t.joinCode === joinCode) ?? null;
+    },
+
+    async rotateJoinCode(trailId) {
+      const trail = state.trails.find((t) => t.id === trailId);
+      if (!trail) return null;
+      trail.joinCode = uniqueJoinCode();
+      return trail;
+    },
+
+    async listTrails() {
+      return [...state.trails]
+        .sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0))
+        .map((trail) => {
+          const versionIds = new Set(
+            state.versions.filter((v) => v.trailId === trail.id).map((v) => v.id),
+          );
+          const pinIds = new Set(
+            state.pins.filter((p) => versionIds.has(p.trailVersionId)).map((p) => p.id),
+          );
+          return {
+            trail,
+            versionNumber:
+              state.versions.find((v) => v.id === trail.currentVersionId)?.versionNumber ?? null,
+            pinCount: state.pins.filter((p) => p.trailVersionId === trail.currentVersionId).length,
+            openReports: state.pinReports.filter((r) => r.status === 'open' && pinIds.has(r.pinId))
+              .length,
+          };
+        });
+    },
+
+    async updateTrail(trailId, changes) {
+      const trail = state.trails.find((t) => t.id === trailId);
+      if (!trail) return null;
+      if (changes.name !== undefined) trail.name = changes.name;
+      if (changes.expiryDays !== undefined) trail.expiryDays = changes.expiryDays;
+      return trail;
+    },
+
+    async listTrailVersions(trailId) {
+      return state.versions
+        .filter((v) => v.trailId === trailId)
+        .sort((a, b) => b.versionNumber - a.versionNumber)
+        .map((v) => ({
+          id: v.id,
+          versionNumber: v.versionNumber,
+          publishedAt: v.publishedAt,
+          pinCount: state.pins.filter((p) => p.trailVersionId === v.id).length,
+        }));
     },
 
     async publishTrailVersion({ trailId, pins }) {

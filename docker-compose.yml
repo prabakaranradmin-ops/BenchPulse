@@ -58,5 +58,20 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # SR-PRIV-01: delete raw location history past the retention window, once at start and then
+  # daily (decision 2026-10-07). A plain loop rather than a cron daemon: nothing extra in the
+  # image, and each run logs one JSON line (`docker compose logs purge`).
+  purge:
+    build:
+      context: ./server
+    command: ['sh', '-c', 'while true; do node dist/jobs/purgeLocationHistory.js; sleep 86400; done']
+    environment:
+      DATABASE_URL: postgres://arquest:arquest@db:5432/ar_quest_trail
+      LOCATION_HISTORY_RETENTION_DAYS: ${LOCATION_HISTORY_RETENTION_DAYS:-90}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
 volumes:
   pgdata:

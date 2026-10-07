@@ -31,6 +31,27 @@ export interface TrailRecord {
   expiryDays: number | null;
   /** null until the Admin publishes a version (GDR-07). */
   currentVersionId: string | null;
+  /** How players reach the trail: a link, a QR code, or typed in (see services/joinCode.ts). */
+  joinCode: string;
+  createdAt?: Date;
+}
+
+/** One row of the Admin's trail list. */
+export interface AdminTrailSummary {
+  trail: TrailRecord;
+  /** The current version's number, or null while unpublished. */
+  versionNumber: number | null;
+  /** Pins in the current version. */
+  pinCount: number;
+  /** GDR-09 reports still open against any version of this trail. */
+  openReports: number;
+}
+
+export interface TrailVersionSummary {
+  id: string;
+  versionNumber: number;
+  publishedAt: Date;
+  pinCount: number;
 }
 
 export interface TrailVersionRecord {
@@ -221,6 +242,23 @@ export interface TrailStore {
 
   /** Out-of-band promotion (`npm run grant-admin`) — never reachable from a player route. */
   setUserRole(userId: string, role: UserRole): Promise<UserRecord | null>;
+
+  // --- Join codes and the Admin's trail management (decision 2026-10-07). ---
+
+  /** The trail a join code opens; codes are stored normalized (see services/joinCode.ts). */
+  getTrailByJoinCode(joinCode: string): Promise<TrailRecord | null>;
+
+  /** Issues a fresh code; the old one stops working at once (a leaked link is revoked this way). */
+  rotateJoinCode(trailId: string): Promise<TrailRecord | null>;
+
+  listTrails(): Promise<AdminTrailSummary[]>;
+
+  updateTrail(
+    trailId: string,
+    changes: { name?: string; expiryDays?: number | null },
+  ): Promise<TrailRecord | null>;
+
+  listTrailVersions(trailId: string): Promise<TrailVersionSummary[]>;
 
   // --- Analytics (ST-8.3, SR-PRIV-03). Aggregates only; no per-player rows leave the store. ---
 

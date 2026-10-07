@@ -20,6 +20,7 @@ import type {
   UserRecord,
 } from './types.js';
 import type { LocationSample } from '../services/locationSanityCheck.js';
+import { generateJoinCode } from '../services/joinCode.js';
 
 const { Pool } = pg;
 
@@ -35,7 +36,33 @@ function toTrail(row: Row): TrailRecord {
     createdBy: row.created_by ?? null,
     expiryDays: row.expiry_days,
     currentVersionId: row.current_version_id,
+    joinCode: row.join_code,
+    createdAt: row.created_at,
   };
+}
+
+const MAX_JOIN_CODE_ATTEMPTS = 5;
+
+function isJoinCodeCollision(err: unknown): boolean {
+  const pgError = err as { code?: string; constraint?: string } | null;
+  return pgError?.code === '23505' && (pgError.constraint ?? '').includes('join_code');
+}
+
+/**
+ * Runs a write with a freshly generated join code, retrying on the (roughly 1-in-10^11) chance
+ * it collides with an existing one. The unique constraint, not this loop, is what guarantees
+ * one code never opens two trails.
+ */
+async function withFreshJoinCode<T>(write: (code: string) => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await write(generateJoinCode());
+    } catch (err) {
+      if (!isJoinCodeCollision(err) || attempt >= MAX_JOIN_CODE_ATTEMPTS) {
+        throw err;
+      }
+    }
+  }
 }
 
 function toTrailVersion(row: Row): TrailVersionRecord {
@@ -347,11 +374,89 @@ export function createPostgresStore(
     },
 
     async createTrail({ name, createdBy, expiryDays }) {
+      return withFreshJoinCode(async (joinCode) => {
+        const { rows } = await pool.query(
+          `INSERT INTO trails (name, created_by, expiry_days, join_code)
+           VALUES ($1, $2, $3, $4) RETURNING *`,
+          [name, createdBy, expiryDays, joinCode],
+        );
+        return toTrail(rows[0]);
+      });
+    },
+
+    async getTrailByJoinCode(joinCode) {
+      const { rows } = await pool.query('SELECT * FROM trails WHERE join_code = $1', [joinCode]);
+      return rows[0] ? toTrail(rows[0]) : null;
+    },
+
+    async rotateJoinCode(trailId) {
+      return withFreshJoinCode(async (joinCode) => {
+        const { rows } = await pool.query(
+          'UPDATE trails SET join_code = $2 WHERE id = $1 RETURNING *',
+          [trailId, joinCode],
+        );
+        return rows[0] ? toTrail(rows[0]) : null;
+      });
+    },
+
+    async listTrails() {
       const { rows } = await pool.query(
-        'INSERT INTO trails (name, created_by, expiry_days) VALUES ($1, $2, $3) RETURNING *',
-        [name, createdBy, expiryDays],
+        `SELECT t.*,
+                cv.version_number AS current_version_number,
+                (SELECT COUNT(*)::int FROM pins p
+                  WHERE p.trail_version_id = t.current_version_id)          AS pin_count,
+                (SELECT COUNT(*)::int FROM pin_reports r
+                   JOIN pins p ON p.id = r.pin_id
+                   JOIN trail_versions v ON v.id = p.trail_version_id
+                  WHERE v.trail_id = t.id AND r.status = 'open')            AS open_reports
+         FROM trails t
+         LEFT JOIN trail_versions cv ON cv.id = t.current_version_id
+         ORDER BY t.created_at DESC, t.name ASC`,
       );
-      return toTrail(rows[0]);
+      return rows.map((row) => ({
+        trail: toTrail(row),
+        versionNumber: row.current_version_number ?? null,
+        pinCount: row.pin_count,
+        openReports: row.open_reports,
+      }));
+    },
+
+    // Each field is applied only when present, so `expiryDays: null` (remove the window) is
+    // distinguishable from "don't touch the window".
+    async updateTrail(trailId, changes) {
+      const { rows } = await pool.query(
+        `UPDATE trails
+         SET name        = CASE WHEN $2 THEN $3 ELSE name END,
+             expiry_days = CASE WHEN $4 THEN $5::int ELSE expiry_days END
+         WHERE id = $1
+         RETURNING *`,
+        [
+          trailId,
+          changes.name !== undefined,
+          changes.name ?? null,
+          changes.expiryDays !== undefined,
+          changes.expiryDays ?? null,
+        ],
+      );
+      return rows[0] ? toTrail(rows[0]) : null;
+    },
+
+    async listTrailVersions(trailId) {
+      const { rows } = await pool.query(
+        `SELECT v.id, v.version_number, v.published_at, COUNT(p.id)::int AS pin_count
+         FROM trail_versions v
+         LEFT JOIN pins p ON p.trail_version_id = v.id
+         WHERE v.trail_id = $1
+         GROUP BY v.id
+         ORDER BY v.version_number DESC`,
+        [trailId],
+      );
+      return rows.map((row) => ({
+        id: row.id,
+        versionNumber: row.version_number,
+        publishedAt: row.published_at,
+        pinCount: row.pin_count,
+      }));
     },
 
     // GDR-07: a new version is additive. Nothing here touches existing versions, their pins, or

@@ -20,6 +20,7 @@ import { runner, type RunnerOption } from 'node-pg-migrate';
 import { buildApp } from '../app.js';
 import { retentionCutoff } from '../services/retention.js';
 import { createPostgresStore } from './postgresStore.js';
+import { generateJoinCode } from '../services/joinCode.js';
 import type { TrailStore } from './types.js';
 
 const connectionString = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
@@ -68,9 +69,10 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
 
     await runner(migrationOptions('up'));
 
-    await fixtures.query('INSERT INTO trails (id, name) VALUES ($1, $2)', [
+    await fixtures.query('INSERT INTO trails (id, name, join_code) VALUES ($1, $2, $3)', [
       trailId,
       'Integration Trail',
+      generateJoinCode(),
     ]);
     await fixtures.query(
       'INSERT INTO trail_versions (id, trail_id, version_number) VALUES ($1, $2, 1)',
@@ -593,6 +595,153 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
     });
   });
 
+  // Decision 2026-10-07: join codes, and the Admin tool's trail management. Every query here is
+  // new SQL (subqueries, a CASE-based partial update), so it runs against Postgres, not just the fake.
+  describe('join codes and trail management', () => {
+    it('lists, opens, edits, and re-codes a trail through the admin API', async () => {
+      const admin = await tokenFor(randomBytes(24).toString('hex'));
+      await store.setUserRole(admin.userId, 'admin');
+      const adminAuth = { authorization: `Bearer ${admin.token}` };
+      const player = await tokenFor(randomBytes(24).toString('hex'));
+      const playerAuth = { authorization: `Bearer ${player.token}` };
+      const pin = (sequenceIndex: number, eastMeters: number) => ({
+        sequenceIndex,
+        lat: 0,
+        lng: eastMeters / METERS_PER_DEGREE_LNG_AT_EQUATOR,
+        radiusM: 10,
+        challengeType: 'proximity_dwell',
+        challengeConfig: { dwell_seconds: 15 },
+      });
+
+      const created = (
+        await app.inject({
+          method: 'POST',
+          url: '/api/v1/admin/trails',
+          headers: adminAuth,
+          payload: { name: 'Coded Trail' },
+        })
+      ).json();
+      expect(created.joinCode).toMatch(/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
+      const publish = (pins: unknown[]) =>
+        app.inject({
+          method: 'POST',
+          url: `/api/v1/admin/trails/${created.trailId}/versions`,
+          headers: adminAuth,
+          payload: { pins },
+        });
+      await publish([pin(1, 0), pin(2, 300)]);
+      const v2 = (await publish([pin(1, 0), pin(2, 300), pin(3, 600)])).json();
+
+      // A player resolves the code to the current version.
+      const joined = await app.inject({
+        method: 'GET',
+        url: `/api/v1/join/${created.joinCode.toLowerCase()}`,
+        headers: playerAuth,
+      });
+      expect(joined.statusCode).toBe(200);
+      expect(joined.json()).toMatchObject({
+        trailId: created.trailId,
+        name: 'Coded Trail',
+        pinCount: 3,
+      });
+
+      // A report makes it show up in the list's open-report count, via the join through versions.
+      await app.inject({
+        method: 'POST',
+        url: `/api/v1/pins/${v2.pins[2].pinId}/report`,
+        headers: playerAuth,
+        payload: { note: 'Fenced off' },
+      });
+      const list = (
+        await app.inject({ method: 'GET', url: '/api/v1/admin/trails', headers: adminAuth })
+      ).json();
+      expect(
+        list.trails.find((t: { trailId: string }) => t.trailId === created.trailId),
+      ).toMatchObject({
+        joinCode: created.joinCode,
+        versionNumber: 2,
+        pinCount: 3,
+        openReports: 1,
+      });
+
+      const detail = (
+        await app.inject({
+          method: 'GET',
+          url: `/api/v1/admin/trails/${created.trailId}`,
+          headers: adminAuth,
+        })
+      ).json();
+      expect(
+        detail.versions.map(
+          (v: { versionNumber: number; pinCount: number; isCurrent: boolean }) => [
+            v.versionNumber,
+            v.pinCount,
+            v.isCurrent,
+          ],
+        ),
+      ).toEqual([
+        [2, 3, true],
+        [1, 2, false],
+      ]);
+      expect(detail.pins).toHaveLength(3);
+
+      // The CASE update: each field changes only when sent, and null clears the window.
+      const patch = (payload: Record<string, unknown>) =>
+        app.inject({
+          method: 'PATCH',
+          url: `/api/v1/admin/trails/${created.trailId}`,
+          headers: adminAuth,
+          payload,
+        });
+      expect((await patch({ name: 'Renamed', expiryDays: 7 })).json()).toMatchObject({
+        name: 'Renamed',
+        expiryDays: 7,
+      });
+      expect((await patch({ expiryDays: null })).json()).toMatchObject({
+        name: 'Renamed',
+        expiryDays: null,
+      });
+
+      // Rotation revokes the old code immediately.
+      const rotated = (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/admin/trails/${created.trailId}/join-code`,
+          headers: adminAuth,
+        })
+      ).json();
+      expect(rotated.joinCode).not.toBe(created.joinCode);
+      expect(
+        (
+          await app.inject({
+            method: 'GET',
+            url: `/api/v1/join/${created.joinCode}`,
+            headers: playerAuth,
+          })
+        ).statusCode,
+      ).toBe(404);
+      expect(
+        (
+          await app.inject({
+            method: 'GET',
+            url: `/api/v1/join/${rotated.joinCode}`,
+            headers: playerAuth,
+          })
+        ).statusCode,
+      ).toBe(200);
+    });
+
+    it('refuses to give two trails the same code', async () => {
+      const [first] = (await fixtures.query('SELECT join_code FROM trails LIMIT 1')).rows;
+      await expect(
+        fixtures.query('INSERT INTO trails (name, join_code) VALUES ($1, $2)', [
+          'Duplicate',
+          first.join_code,
+        ]),
+      ).rejects.toMatchObject({ code: '23505' });
+    });
+  });
+
   describe('analytics aggregation (SR-PRIV-03)', () => {
     const analyticsTrailId = randomUUID();
     const analyticsVersionId = randomUUID();
@@ -639,9 +788,10 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
     }
 
     beforeAll(async () => {
-      await fixtures.query('INSERT INTO trails (id, name) VALUES ($1, $2)', [
+      await fixtures.query('INSERT INTO trails (id, name, join_code) VALUES ($1, $2, $3)', [
         analyticsTrailId,
         'Analytics Trail',
+        generateJoinCode(),
       ]);
       await fixtures.query(
         'INSERT INTO trail_versions (id, trail_id, version_number) VALUES ($1, $2, 1)',
@@ -863,6 +1013,63 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
           anonymous: 401,
         });
       }
+    });
+  });
+});
+
+// The join-code migration backfills trails that existed before it. Run it the way it would run on
+// a live database: everything before it, then some old trails, then the rest.
+describeIfDatabase('trail join-code migration backfill (decision 2026-10-07)', () => {
+  const schemaName = `qt_backfill_${randomBytes(4).toString('hex')}`;
+  const migrationsDir = fileURLToPath(new URL('../../migrations', import.meta.url));
+  let pool: pg.Pool | undefined;
+
+  const migrate = (count?: number): Promise<unknown> =>
+    runner({
+      databaseUrl: connectionString as string,
+      dir: migrationsDir,
+      direction: 'up',
+      schema: [schemaName, 'public'],
+      migrationsSchema: schemaName,
+      createSchema: true,
+      createMigrationsSchema: true,
+      migrationsTable: 'pgmigrations',
+      log: () => {},
+      ...(count !== undefined ? { count } : {}),
+    });
+
+  afterAll(async () => {
+    if (pool) {
+      await pool.query(`DROP SCHEMA IF EXISTS ${schemaName} CASCADE`);
+      await pool.end();
+    }
+  });
+
+  it('gives every pre-existing trail its own valid code, then requires one', async () => {
+    pool = new pg.Pool({ connectionString, options: `-c search_path=${schemaName},public` });
+    await pool.query('CREATE EXTENSION IF NOT EXISTS postgis');
+    const files = (await readdir(migrationsDir)).filter((file) => file.endsWith('.sql')).sort();
+    const joinCodeMigration = files.findIndex((file) => file.includes('trail-join-codes'));
+    expect(joinCodeMigration).toBeGreaterThan(0);
+
+    await migrate(joinCodeMigration);
+    for (let i = 0; i < 25; i++) {
+      await pool.query('INSERT INTO trails (name) VALUES ($1)', [`Old trail ${i}`]);
+    }
+    await migrate();
+
+    const { rows } = await pool.query('SELECT join_code FROM trails');
+    expect(rows).toHaveLength(25);
+    for (const row of rows) {
+      expect(row.join_code).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
+    }
+    // The subquery is correlated to each row; were it hoisted, all 25 would share one code.
+    expect(new Set(rows.map((row) => row.join_code)).size).toBe(25);
+
+    await expect(
+      pool.query('INSERT INTO trails (name) VALUES ($1)', ['No code']),
+    ).rejects.toMatchObject({
+      code: '23502', // not_null_violation
     });
   });
 });

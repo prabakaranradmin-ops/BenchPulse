@@ -437,6 +437,19 @@ describe('admin authorization (requirements §2)', () => {
     },
     { method: 'GET' as const, url: '/api/v1/admin/analytics/trails', payload: undefined },
     { method: 'GET' as const, url: '/api/v1/admin/analytics/trails/trail-1', payload: undefined },
+    { method: 'GET' as const, url: '/api/v1/admin/trails', payload: undefined },
+    { method: 'GET' as const, url: '/api/v1/admin/trails/trail-1', payload: undefined },
+    {
+      method: 'PATCH' as const,
+      url: '/api/v1/admin/trails/trail-1',
+      payload: { name: 'Mine now' },
+    },
+    { method: 'POST' as const, url: '/api/v1/admin/trails/trail-1/join-code', payload: undefined },
+    {
+      method: 'POST' as const,
+      url: '/api/v1/admin/trails/validate',
+      payload: { pins: [draftPin(1, 0)] },
+    },
   ];
 
   it('403s a player on every authoring route — content is Admin-authored in v1', async () => {

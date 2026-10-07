@@ -12,8 +12,8 @@ namespace ArQuestTrail.Core
             // snake_case challenge keys) still win over the resolver.
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
 
-            // The server validates request bodies with JSON Schema and `additionalProperties:
-            // false`: an optional field sent as `null` is a 400, not "absent". Omit it instead.
+            // The server validates request bodies strictly (no type coercion, unknown fields
+            // rejected): an optional field sent as `null` is a 400, not "absent". Omit it instead.
             NullValueHandling = NullValueHandling.Ignore,
 
             // Timestamps stay strings until IsoTime parses them on purpose. Newtonsoft's default

@@ -353,6 +353,50 @@ describe('POST /api/v1/attempts/:attemptId/pins/:pinId/complete (ST-2.3)', () =>
     expect(response.json()).toEqual({ error: 'recorded_at_before_attempt' });
   });
 
+  it('rejects a null accuracy instead of reading it as perfect accuracy (SR-SEC-02)', async () => {
+    // Fastify's default validator coerced null to 0 here — a sample claiming 0m accuracy.
+    ctx = await buildTestApp(seedState(seedTrail(TWO_PIN_TRAIL)));
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+
+    const response = await ctx.app.inject({
+      method: 'POST',
+      url: `/api/v1/attempts/${attemptId}/pins/pin-1/complete`,
+      headers: ctx.authHeader(PLAYER_A),
+      payload: {
+        lat: 0,
+        lng: 0,
+        accuracyM: 5,
+        recentLocationHistory: [
+          {
+            lat: 0,
+            lng: 0,
+            accuracyM: null,
+            recordedAt: new Date(Date.now() - 5000).toISOString(),
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(ctx.store.state.locationHistory).toHaveLength(0);
+    expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('unlocked');
+  });
+
+  it('rejects a field it does not know rather than silently dropping it', async () => {
+    ctx = await buildTestApp(seedState(seedTrail(TWO_PIN_TRAIL)));
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+
+    const response = await ctx.app.inject({
+      method: 'POST',
+      url: `/api/v1/attempts/${attemptId}/pins/pin-1/complete`,
+      headers: ctx.authHeader(PLAYER_A),
+      payload: { lat: 0, lng: 0, accuracyM: 5, userId: PLAYER_B },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('unlocked');
+  });
+
   it('400s an unparseable timestamp', async () => {
     ctx = await buildTestApp(seedState(seedTrail(TWO_PIN_TRAIL)));
     const attemptId = await startAttempt(ctx, PLAYER_A);

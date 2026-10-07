@@ -6,6 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp, type BuildAppOptions } from '../app.js';
 import { createMemoryStore, type MemoryState, type MemoryStore } from '../db/memoryStore.js';
 import type { PinRecord, TrailRecord, TrailVersionRecord, UserRole } from '../db/types.js';
+import { generateJoinCode } from '../services/joinCode.js';
 
 export const TEST_JWT_SECRET = 'test-secret-not-for-production';
 
@@ -131,6 +132,8 @@ export interface SeedTrailSpec {
   expiryDays?: number | null;
   /** When false, the trail exists but has no current_version_id (unpublished). */
   published?: boolean;
+  /** Defaults to a freshly generated code. */
+  joinCode?: string;
   pins: SeedPinSpec[];
 }
 
@@ -157,6 +160,8 @@ export function seedTrail(spec: SeedTrailSpec): SeededTrail {
     name: spec.name ?? 'Harbour Trail',
     expiryDays: spec.expiryDays ?? null,
     currentVersionId: spec.published === false ? null : versionId,
+    joinCode: spec.joinCode ?? generateJoinCode(),
+    createdAt: new Date('2026-01-01T00:00:00Z'),
   };
 
   const pins: PinRecord[] = spec.pins.map((pin) => ({

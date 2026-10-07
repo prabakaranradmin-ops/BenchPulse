@@ -1,7 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { authenticate, requireAdmin, userIdOf } from '../plugins/auth.js';
 import { toClientPin } from '../services/pinDto.js';
-import { validateTrailDraft, type DraftPin } from '../services/trailValidation.js';
+import {
+  validateTrailDraft,
+  type DraftPin,
+  type TrailValidationResult,
+} from '../services/trailValidation.js';
+import { landcoverWarnings } from '../services/landcover.js';
+import { formatJoinCode } from '../services/joinCode.js';
 import {
   MIN_COHORT_SIZE,
   parseAnalyticsRange,
@@ -9,7 +15,61 @@ import {
   summarizeTrail,
   type ParsedRange,
 } from '../services/analytics.js';
-import type { NewPinInput, PinReportStatus } from '../db/types.js';
+import type {
+  NewPinInput,
+  PinRecord,
+  PinReportStatus,
+  TrailRecord,
+  TrailVersionRecord,
+} from '../db/types.js';
+
+/** The Admin's view of a trail. Unlike the player payload, it includes the join code. */
+function adminTrail(trail: TrailRecord) {
+  return {
+    trailId: trail.id,
+    name: trail.name,
+    joinCode: formatJoinCode(trail.joinCode),
+    expiryDays: trail.expiryDays,
+    currentVersionId: trail.currentVersionId,
+    createdAt: trail.createdAt ? trail.createdAt.toISOString() : null,
+  };
+}
+
+/**
+ * The Admin's view of a pin: the *full* authored challenge, code answers included — the Admin
+ * wrote them and edits them. Never served on a player route (those use pinDto's allowlist).
+ */
+function adminPin(pin: PinRecord) {
+  return {
+    pinId: pin.id,
+    sequenceIndex: pin.sequenceIndex,
+    lat: pin.lat,
+    lng: pin.lng,
+    alt: pin.alt,
+    radiusM: pin.radiusM,
+    challengeType: pin.challengeType,
+    challengeConfig: pin.challengeConfig,
+  };
+}
+
+/**
+ * Structural checks first; the SR-ADMIN-01 landcover lookup only for a draft that could actually
+ * publish — no point spending an Overpass request on one that can't.
+ */
+async function validateDraft(
+  app: FastifyInstance,
+  pins: DraftPin[],
+): Promise<TrailValidationResult> {
+  const validation = validateTrailDraft(pins);
+  if (validation.errors.length > 0) {
+    return validation;
+  }
+
+  const landcover = await app.landcover.check(
+    pins.map((pin) => ({ sequenceIndex: pin.sequenceIndex, lat: pin.lat, lng: pin.lng })),
+  );
+  return { errors: [], warnings: [...validation.warnings, ...landcoverWarnings(landcover)] };
+}
 
 /** Echoes the window actually applied, so a caller can tell "all time" from "empty week". */
 function rangeResponse(range: ParsedRange) {
@@ -64,6 +124,27 @@ const publishVersionSchema = {
   },
 } as const;
 
+/** Like publishing, but an empty draft is a valid question ("what's wrong so far?"). */
+const validateDraftSchema = {
+  type: 'object',
+  required: ['pins'],
+  additionalProperties: false,
+  properties: {
+    pins: { type: 'array', minItems: 0, maxItems: 200, items: pinSchema },
+  },
+} as const;
+
+const updateTrailSchema = {
+  type: 'object',
+  additionalProperties: false,
+  minProperties: 1,
+  properties: {
+    name: { type: 'string', minLength: 1, maxLength: 200 },
+    // null removes the GDR-08 validity window.
+    expiryDays: { type: ['integer', 'null'], minimum: 1 },
+  },
+} as const;
+
 const REPORT_STATUSES: readonly PinReportStatus[] = ['open', 'reviewed', 'resolved'];
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
@@ -82,12 +163,86 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         expiryDays: expiryDays ?? null,
       });
 
-      return reply.code(201).send({
-        trailId: trail.id,
-        name: trail.name,
-        expiryDays: trail.expiryDays,
-        currentVersionId: trail.currentVersionId,
-      });
+      return reply.code(201).send(adminTrail(trail));
+    },
+  );
+
+  // The Admin tool's trail list: newest first, with what each row needs at a glance.
+  app.get('/api/v1/admin/trails', adminOnly, async (_request, reply) => {
+    const summaries = await app.store.listTrails();
+    return reply.send({
+      trails: summaries.map((summary) => ({
+        ...adminTrail(summary.trail),
+        versionNumber: summary.versionNumber,
+        pinCount: summary.pinCount,
+        openReports: summary.openReports,
+      })),
+    });
+  });
+
+  // One trail for editing: its current pins in full (code answers included) and its versions.
+  app.get('/api/v1/admin/trails/:trailId', adminOnly, async (request, reply) => {
+    const { trailId } = request.params as { trailId: string };
+    const trail = await app.store.getTrail(trailId);
+    if (!trail) {
+      return reply.code(404).send({ error: 'trail_not_found' });
+    }
+
+    const [versions, pins] = await Promise.all([
+      app.store.listTrailVersions(trail.id),
+      trail.currentVersionId
+        ? app.store.getPinsForVersion(trail.currentVersionId)
+        : Promise.resolve([]),
+    ]);
+
+    return reply.send({
+      ...adminTrail(trail),
+      versions: versions.map((version) => ({
+        trailVersionId: version.id,
+        versionNumber: version.versionNumber,
+        publishedAt: version.publishedAt.toISOString(),
+        pinCount: version.pinCount,
+        isCurrent: version.id === trail.currentVersionId,
+      })),
+      pins: pins.map(adminPin),
+    });
+  });
+
+  // Rename, or change the GDR-08 window. Pins change only by publishing a version (GDR-07).
+  app.patch(
+    '/api/v1/admin/trails/:trailId',
+    { ...adminOnly, schema: { body: updateTrailSchema } },
+    async (request, reply) => {
+      const { trailId } = request.params as { trailId: string };
+      const changes = request.body as { name?: string; expiryDays?: number | null };
+
+      const trail = await app.store.updateTrail(trailId, changes);
+      if (!trail) {
+        return reply.code(404).send({ error: 'trail_not_found' });
+      }
+      return reply.send(adminTrail(trail));
+    },
+  );
+
+  // A fresh join code. The old code — and every link and QR printed with it — stops working
+  // immediately; this is how a leaked link is revoked.
+  app.post('/api/v1/admin/trails/:trailId/join-code', adminOnly, async (request, reply) => {
+    const { trailId } = request.params as { trailId: string };
+    const trail = await app.store.rotateJoinCode(trailId);
+    if (!trail) {
+      return reply.code(404).send({ error: 'trail_not_found' });
+    }
+    return reply.send({ trailId: trail.id, joinCode: formatJoinCode(trail.joinCode) });
+  });
+
+  // A dry run of publishing: the same errors and warnings, nothing written. The Admin tool calls
+  // this as pins are placed, so problems show up while editing rather than at the end.
+  app.post(
+    '/api/v1/admin/trails/validate',
+    { ...adminOnly, schema: { body: validateDraftSchema } },
+    async (request, reply) => {
+      const { pins } = request.body as { pins: DraftPin[] };
+      return reply.send(await validateDraft(app, pins));
     },
   );
 
@@ -105,7 +260,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'trail_not_found' });
       }
 
-      const validation = validateTrailDraft(pins);
+      const validation = await validateDraft(app, pins);
       if (validation.errors.length > 0) {
         return reply.code(422).send({ error: 'invalid_trail', errors: validation.errors });
       }
@@ -150,17 +305,49 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       limit: parsedLimit,
     });
 
-    return reply.send({
-      reports: reports.map((report) => ({
-        reportId: report.id,
-        pinId: report.pinId,
-        note: report.note,
-        status: report.status,
-        createdAt: report.createdAt.toISOString(),
-        // Deliberately not the reporter's id: the Admin is triaging a *place*, and a report
-        // may well outlive its reporter (SR-PRIV-02).
-      })),
-    });
+    // Where each reported pin is, so the Admin tool can fly the map to it. Memoised per request:
+    // a page of reports usually covers a handful of pins and one or two trails.
+    const pins = new Map<string, Promise<PinRecord | null>>();
+    const versions = new Map<string, Promise<TrailVersionRecord | null>>();
+    const trails = new Map<string, Promise<TrailRecord | null>>();
+    const memo = <T>(cache: Map<string, Promise<T>>, key: string, load: () => Promise<T>) => {
+      if (!cache.has(key)) cache.set(key, load());
+      return cache.get(key) as Promise<T>;
+    };
+
+    const enriched = await Promise.all(
+      reports.map(async (report) => {
+        const pin = await memo(pins, report.pinId, () => app.store.getPin(report.pinId));
+        const version = pin
+          ? await memo(versions, pin.trailVersionId, () =>
+              app.store.getTrailVersion(pin.trailVersionId),
+            )
+          : null;
+        const trail = version
+          ? await memo(trails, version.trailId, () => app.store.getTrail(version.trailId))
+          : null;
+        return {
+          reportId: report.id,
+          pinId: report.pinId,
+          note: report.note,
+          status: report.status,
+          createdAt: report.createdAt.toISOString(),
+          // Deliberately not the reporter's id: the Admin is triaging a *place*, and a report
+          // may well outlive its reporter (SR-PRIV-02).
+          trailId: trail?.id ?? null,
+          trailName: trail?.name ?? null,
+          sequenceIndex: pin?.sequenceIndex ?? null,
+          lat: pin?.lat ?? null,
+          lng: pin?.lng ?? null,
+          versionNumber: version?.versionNumber ?? null,
+          // A report against a replaced version may already be fixed by the republish.
+          isCurrentVersion:
+            trail !== null && version !== null && trail.currentVersionId === version.id,
+        };
+      }),
+    );
+
+    return reply.send({ reports: enriched });
   });
 
   // ST-8.3 / SR-PRIV-03 — aggregated completion analytics. Admin-only, like everything else

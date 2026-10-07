@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { buildApp } from './app.js';
 import { createPostgresStore } from './db/postgresStore.js';
+import { createOverpassChecker } from './services/landcover.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -20,9 +21,21 @@ if (jwtSecret === 'change-me' && process.env.NODE_ENV === 'production') {
   process.exit(1);
 }
 
+// SR-ADMIN-01: OpenStreetMap water/building lookups at publish time (decision 2026-10-07).
+// LANDCOVER_CHECKS=off disables them; OVERPASS_URLS (comma-separated) points at other servers.
+const landcover =
+  process.env.LANDCOVER_CHECKS === 'off'
+    ? undefined
+    : createOverpassChecker({
+        endpoints: process.env.OVERPASS_URLS?.split(',')
+          .map((url) => url.trim())
+          .filter(Boolean),
+      });
+
 const app = await buildApp({
   store: createPostgresStore(databaseUrl),
   jwtSecret,
+  landcover,
   logger: true,
 });
 
