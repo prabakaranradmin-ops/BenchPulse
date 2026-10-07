@@ -23,7 +23,7 @@ Ordered to match the build sequence in `../CLAUDE.md` — do them roughly top to
   single source of truth, and are append-only from here.
 
 ## EPIC 2 — Backend: Trail & Pin API Routes
-**Status: done — 59 passing tests. See `server/README.md` for the API reference.**
+**Status: done. See `server/README.md` for the API reference.**
 
 - **ST-2.1 — `GET /api/v1/trails/:trailId`** (SR-NET-01) ✅ DONE
   `server/src/routes/trails.ts` + `services/pinDto.ts` (allowlisted `challenge_config` keys, so a
@@ -53,40 +53,61 @@ Ordered to match the build sequence in `../CLAUDE.md` — do them roughly top to
 - **ST-2.6 — Player identity / token issuance** ✅ DONE (gap found while building ST-2.5)
   `POST /api/v1/players/token` in `server/src/routes/players.ts`. Anonymous device-bound
   identity `[ASSUMED — confirm or override]`: the client exchanges a stored high-entropy device
-  key for a 30-day session token; only the key's hash is stored. Added `users.device_key_hash`
-  to `schema.sql` — an existing database needs
-  `ALTER TABLE users ADD COLUMN device_key_hash TEXT UNIQUE;`.
-  **Open product question:** the device key is the account. No recovery, no cross-device sync
-  until real sign-in exists. Confirm that's acceptable for the field test, or promote sign-in.
+  key for a 30-day session token; only the key's hash is stored (`users.device_key_hash`, part
+  of the initial migration).
+  **Decided:** the device key is the account for the ST-4.3 field test; recovery / account
+  linking is a post-slice upgrade.
 
 - **ST-2.7 — Postgres integration pass** ✅ DONE
-  `server/src/db/postgresStore.integration.test.ts` — loads `schema.sql` into a throwaway
+  `server/src/db/postgresStore.integration.test.ts` — runs the real migrations into a throwaway
   schema and runs token exchange → trail fetch → attempt → both pins → replay → cross-player
   rejection → pin report against real Postgres+PostGIS. Skips unless `TEST_DATABASE_URL` is
   set, so the default `npm test` still needs no database.
 
-## EPIC 3 — Unity Client: AR Positioning Foundation
-**This is the next work.** The server side of ST-3.3/ST-4.1 is live and verified; a client can
-now exchange a device key for a token, fetch a trail, start an attempt, and complete pins.
+- **ST-2.8 — Serve a trail's snapshotted versions** ✅ DONE (gap found while writing the client)
+  `GET /api/v1/trails/:trailId/versions/:trailVersionId`. An attempt plays the version it
+  started on (GDR-07), but nothing could serve that version's coordinates once the Admin
+  republished or a reinstall wiped the client's cache (CR-02). `isCurrentVersion` on both routes.
 
-- **ST-3.1 — VPS localization + GPS fallback** (SR-GEO-03, SR-NET-03)
-  Fill in `VpsLocalizationService.cs`. AC: emits `PositionSource.Vps` only when horizontal
-  accuracy ≤0.5m and heading accuracy ≤5°; falls back to `GpsFallback` on VPS timeout/failure
-  without faking a tighter accuracy value than GPS actually reports.
-- **ST-3.2 — Floating origin / double-precision math** (SR-GEO-01, SR-GEO-02)
-  Fill in `PinController.ComputeLocalOffset`. Recommend using Cesium for Unity's georeference
-  component rather than hand-rolling the geodetic math.
-- **ST-3.3 — Trail fetch + local caching** (SR-NET-01)
-  Fill in `TrailManager.LoadTrail` against ST-2.1's endpoint; cache the response so a previously
-  downloaded trail can be browsed offline.
+- **ST-2.9 — Reject impossible capture times** ✅ DONE (found while writing the offline queue)
+  `recordedAt` must fall within [attempt start − 5min, now + 5min] `[ASSUMED: 5-minute skew]`.
+  Stops negative time-to-complete in SR-PRIV-03 analytics and a completion dated before its
+  attempt existed. A *plausible* past time is still accepted by design — that's what a truthful
+  offline capture looks like; distinguishing forgery needs attestation, which §6.4 defers.
+
+## Client status legend
+🟡 **CODE COMPLETE** = written; logic tested in `client-unity/dotnet` (unit + contract tests
+against the real server, in CI); Unity glue type-checked against Unity reference assemblies —
+**but not yet run in a Unity Editor or on a device.** It becomes ✅ after the Editor run and the
+ST-4.3 field test. See `client-unity/README.md` for exactly what was verified how.
+
+## EPIC 3 — Unity Client: AR Positioning Foundation
+
+- **ST-3.0 — Client identity bootstrap** (ST-2.6, client half) 🟡 CODE COMPLETE (NEW)
+  `Core/Identity/DeviceIdentity.cs` + `Core/Api/QuestApiClient.cs`: 256-bit key generated once,
+  lazy sign-in, refresh before expiry, one re-exchange on a rejected token, PlayerGone handling.
+  **Known limit:** key stored in the app sandbox, not Keychain/Keystore — fine for the field
+  test, not for launch.
+- **ST-3.1 — VPS localization + GPS fallback** (SR-GEO-03, SR-NET-03) 🟡 CODE COMPLETE
+  Rule in `Core/Location/PositionSourceSelector.cs` (tested): VPS only at ≤0.5m / ≤5°; timed
+  fallback to GPS keeping GPS's own accuracy. ARCore glue in `ARCore/ArCoreGeospatialProvider.cs`
+  (API checked against ARCore Extensions 1.56.0 source).
+- **ST-3.2 — Double-precision local offsets** (SR-GEO-02) 🟡 CODE COMPLETE (simplified, approved)
+  `GeoMath.ToEnu` — local ENU offsets, doubles until the final cast. SR-GEO-01 floating-origin
+  re-centring / Cesium is deferred past ST-4.3, as agreed.
+- **ST-3.3 — Trail fetch + local caching** (SR-NET-01) 🟡 CODE COMPLETE
+  `Core/Offline/TrailCache.cs`, cached by version; `QuestSession.LoadTrailAsync` falls back to it
+  offline; resume resolves the attempt's own version via ST-2.8.
 
 ## EPIC 4 — Unity Client: First Playable Slice
 
-- **ST-4.1 — Wire `ProximityDwellChallenge` to the real API**
-  Replace the local-only `OnChallengeCompleted` event with a call to ST-2.3's endpoint; handle
-  its response (including a rejected/flagged case) rather than assuming success.
-- **ST-4.2 — Minimal UI**: current-pin indicator, dwell progress, and the "GPS signal weak — move
-  to open sky" hint from SR-GEO-04.
+- **ST-4.1 — Wire `ProximityDwellChallenge` to the real API** 🟡 CODE COMPLETE
+  `Core/Challenges/DwellTracker.cs` (tested) mirrors SR-GEO-04 exactly — the old stub omitted the
+  ceiling cap — and every completion goes through the outbox (ST-9.1). A contract test sweeps eight
+  boundary cases where the client must predict the real server's verdict, distance included.
+- **ST-4.2 — Minimal UI** 🟡 CODE COMPLETE
+  `QuestHud.cs` (IMGUI, no scene wiring): current pin, distance + direction, dwell progress,
+  SR-GEO-04's weak-GPS wording, plus an Editor walker for playing the loop without a device.
 - **ST-4.3 — Field test**: one real-device walkthrough of a 2-pin trail end to end, per the field
   test matrix in requirements §7, before adding anything past this point.
   **Deployable artifact exists:** `docker compose up --build` (repo root) runs Postgres+PostGIS,
@@ -101,8 +122,16 @@ now exchange a device key for a token, fetch a trail, start an attempt, and comp
 ## EPIC 5 — Occlusion & Fairness Polish
 *(Deliberately after Epic 4 — occlusion is fairness/polish, not gameplay-blocking.)*
 
-- **ST-5.1 — Hardware depth occlusion** (SR-VIS-01): wire `AROcclusionManager` on capable devices.
-- **ST-5.2 — Distance-fade fallback** (SR-VIS-02): fill in `OcclusionFallbackController.ApplyDistanceFade` for devices without a usable depth signal.
+*(Code written alongside Epic 4 because it was cheap with the Core in place — but still verified
+only after the field test, as planned. Visual QA per device tier is manual by design, §7.)*
+
+- **ST-5.1 — Hardware depth occlusion** (SR-VIS-01) 🟡 CODE COMPLETE
+  `ARFoundation/ArFoundationDepthProvider.cs` requests `EnvironmentDepthMode.Best` and reports
+  whether depth actually runs (API checked against AR Foundation 6.6.2 source).
+- **ST-5.2 — Distance-fade fallback** (SR-VIS-02) 🟡 CODE COMPLETE
+  Curve in `Core/Geo/DistanceFade.cs` (tested; never fully invisible), applied by
+  `OcclusionFallbackController.cs` only when depth isn't running. Alpha needs a transparent pin
+  material; the scale cue works on any.
 
 ## EPIC 6 — Additional Challenge Types
 - **ST-6.1 — `photo_confirmation`** (GDR-02, GDR-10 unlimited retries) — not started.
@@ -120,6 +149,9 @@ now exchange a device key for a token, fetch a trail, start an attempt, and comp
   trace and can be retried immediately (GDR-10 unlimited retries, GDR-12 stateless attempts).
   A code pin published without a code returns `challenge_not_configured` (409) rather than
   letting anyone through — SR-ADMIN-01 already warns about this at publish time.
+  **Client half 🟡 CODE COMPLETE:** code entry in `QuestHud`. Offline, a code is queued but the
+  next pin stays locked until the server checks it (`ChallengeTypes.CanVerifyOnDevice`) — the
+  device never holds the answer, so it can't let a player walk on past a wrong code.
 
 ## EPIC 7 — Desktop Admin Authoring Tool
 *(Backend pulled forward: until this existed, a trail could only be created with raw SQL, which
@@ -168,9 +200,15 @@ client epics need the Unity Editor and a real device.)*
   Requirements §8 keeps dashboarding out of v1 — this is the raw-aggregate API only.
 
 ## EPIC 9 — Offline Resilience
-- **ST-9.1 — Offline completion queue** (SR-NET-02): queue completions attempted offline,
-  submit on reconnect timestamped at the *original* capture time, not reconnect time.
-- **ST-9.2 — UI indicator** for reduced-precision/offline mode.
+- **ST-9.1 — Offline completion queue** (SR-NET-02) 🟡 CODE COMPLETE
+  `Core/Offline/CompletionOutbox.cs`: every completion is persisted before it's sent, sent in
+  order, a lost reply's retry (409 pin_already_completed) counts as confirmed, and a rejection
+  supersedes only that attempt's later pins. A contract test completes the final pin in airplane
+  mode and asserts the attempt closed at the offline fix's capture time, not at reconnect —
+  requirements §7's airplane-mode test, automated against the real server.
+- **ST-9.2 — UI indicator** for reduced-precision/offline mode 🟡 CODE COMPLETE
+  `QuestHud` status lines: position source with an explicit "GPS only — reduced precision"
+  (SR-NET-03), "Offline · N waiting to sync", and pins awaiting sync tinted differently.
 
 ---
 

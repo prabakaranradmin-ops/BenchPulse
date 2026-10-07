@@ -73,3 +73,70 @@ jobs:
       - name: Audit production dependencies
         # Dev-only advisories shouldn't block a merge; anything shipped should.
         run: npm audit --omit=dev --audit-level=high
+
+  client:
+    name: Client Core (unit + contract tests against the real server)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4-alpine
+        env:
+          POSTGRES_USER: arquest
+          POSTGRES_PASSWORD: arquest
+          POSTGRES_DB: ar_quest_trail
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U arquest -d ar_quest_trail -h 127.0.0.1 -p 5432"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://arquest:arquest@localhost:5432/ar_quest_trail
+      # Set, so the contract tests run instead of skipping. A server that never came up makes
+      # them fail, not skip — the property the server's DB suite has too.
+      QUEST_API_URL: http://127.0.0.1:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build the server
+        working-directory: server
+        run: npm ci && npm run build && npm run migrate
+
+      - name: Start the server
+        working-directory: server
+        run: |
+          JWT_SECRET="ci-$(openssl rand -hex 16)" PORT=3000 nohup node dist/index.js > server.log 2>&1 &
+          curl --silent --fail --retry 30 --retry-delay 1 --retry-connrefused http://127.0.0.1:3000/health
+
+      - name: Promote a throwaway admin for the contract tests
+        working-directory: server
+        run: |
+          KEY="$(openssl rand -hex 32)"
+          echo "QUEST_ADMIN_DEVICE_KEY=$KEY" >> "$GITHUB_ENV"
+          node dist/jobs/seedFieldTestTrail.js --lat 13.0827 --lng 80.2707 --admin-key "$KEY"
+
+      - name: Build Core for Unity's profile (netstandard2.1, C# 9, warnings as errors)
+        working-directory: client-unity/dotnet/ArQuestTrail.Core
+        run: dotnet build --configuration Release
+
+      - name: Test (unit + contract)
+        working-directory: client-unity/dotnet/ArQuestTrail.Core.Tests
+        run: dotnet test --configuration Release --logger "console;verbosity=normal"
+
+      - name: Server log, if anything failed
+        if: failure()
+        run: cat server/server.log || true
