@@ -1,0 +1,26 @@
+{
+    "name": "ArQuestTrail.ARFoundation",
+    "rootNamespace": "ArQuestTrail",
+    "references": [
+        "ArQuestTrail",
+        "Unity.XR.ARFoundation",
+        "Unity.XR.ARSubsystems"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "ARQT_AR_FOUNDATION"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.unity.xr.arfoundation",
+            "expression": "4.1.0",
+            "define": "ARQT_AR_FOUNDATION"
+        }
+    ],
+    "noEngineReferences": false
+}

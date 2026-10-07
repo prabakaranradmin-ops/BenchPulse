@@ -1,9 +1,16 @@
 {
-  "_comment": "Merge these entries into the generated Packages/manifest.json's 'dependencies' object after creating the Unity project. Version numbers are illustrative — check the Package Manager / Google's ARCore Extensions repo for current versions before installing.",
+  "_comment": "Merge these into the generated Packages/manifest.json 'dependencies' after creating the Unity 6 project. Versions were current when written (AR Foundation 6.x requires Unity 6000.0+); taking newer patch versions from Package Manager is fine.",
   "dependencies": {
-    "com.unity.xr.arfoundation": "5.1.5",
-    "com.unity.xr.arcore": "5.1.5",
-    "com.unity.xr.arkit": "5.1.5"
+    "com.unity.nuget.newtonsoft-json": "3.2.2",
+    "com.unity.xr.arfoundation": "6.1.1",
+    "com.unity.xr.arcore": "6.1.1",
+    "com.unity.xr.arkit": "6.1.1",
+    "com.google.ar.core.arfoundation.extensions": "https://github.com/google-ar/arcore-unity-extensions.git#1.56.0"
   },
-  "_arcore_extensions_note": "ARCore Extensions for AR Foundation (Google Geospatial API) is not distributed through the main Unity registry. Install via Unity's Package Manager 'Add package from git URL' using the URL and version Google's current ARCore Extensions documentation specifies, or via the .tgz distribution if that's what's current when you set this up."
+  "_why_each": {
+    "com.unity.nuget.newtonsoft-json": "Required. Assets/Scripts/Core parses the API with it; nothing compiles without it.",
+    "com.unity.xr.arfoundation": "Optional for an Editor run, required on a device. Enables the ArQuestTrail.ARFoundation assembly (depth occlusion, SR-VIS-01/02).",
+    "com.unity.xr.arcore / arkit": "The platform providers AR Foundation drives on Android / iOS.",
+    "com.google.ar.core.arfoundation.extensions": "Geospatial / VPS (SR-GEO-03). Enables the ArQuestTrail.ARCore assembly. Not in Unity's registry, hence the git URL; check Google's docs for the current tag."
+  }
 }

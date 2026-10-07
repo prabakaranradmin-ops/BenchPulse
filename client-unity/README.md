@@ -1,51 +1,113 @@
 # Client (Unity)
 
-Unity projects are created through Unity Hub/Editor, not from the command line, so this folder
-isn't a runnable Unity project yet — it's the target shape to create and drop these files into.
-See `../docs/requirements-v1.0.md` §6.1–6.2 and §6.7 for the requirements these scripts implement.
+The player app. Unity projects are created through Unity Hub, so this folder isn't a complete
+Unity project yet — it holds everything that goes *into* one: the scripts, their assembly
+definitions, and the package list. See `../docs/requirements-v1.0.md` §6 for the requirement IDs
+referenced throughout.
+
+## How the code is organised
+
+| Folder | Assembly | What it is | How it's verified |
+| --- | --- | --- | --- |
+| `Assets/Scripts/Core/` | `ArQuestTrail.Core` | All client logic: API client and tokens, the SR-GEO-04 rule, dwell timing, VPS/GPS selection, offline outbox, caching, progress. **No `UnityEngine`.** | 104 unit tests + 5 contract tests against the real server (`dotnet/`), run in CI |
+| `Assets/Scripts/*.cs`, `Platform/` | `ArQuestTrail` | Thin MonoBehaviours: feed Unity's inputs into Core, draw the results, field-test HUD | Type-checked against Unity 2021.3 reference assemblies (Editor, Android, iOS defines) — not yet run in a real Editor |
+| `Assets/Scripts/ARCore/` | `ArQuestTrail.ARCore` | VPS via ARCore Geospatial + geospatial anchors | API calls checked line by line against ARCore Extensions 1.56.0 source — not compiled |
+| `Assets/Scripts/ARFoundation/` | `ArQuestTrail.ARFoundation` | Environment-depth occlusion | API calls checked against AR Foundation 6.6.2 source — not compiled |
+
+The two AR assemblies compile **only once their package is installed** (asmdef `versionDefines` →
+`defineConstraints`). So a fresh project with nothing but Newtonsoft compiles and runs in the
+Editor with a simulated walker, and VPS/occlusion light up as you add the AR packages. If an AR
+API differs in your installed version, the compile error will be in exactly one small file.
+
+Why Core is separate: the trust-critical logic — "is the player close enough", "what happens to a
+completion made offline" — must match the server exactly, and that's only checkable where it can
+be tested. `dotnet/` compiles the very same `Core/` files for netstandard2.1 + C# 9 (Unity's
+profile) and tests them, including against the live server:
+
+```bash
+cd client-unity/dotnet/ArQuestTrail.Core.Tests
+dotnet test                                     # 104 unit tests
+QUEST_API_URL=http://127.0.0.1:3000 QUEST_ADMIN_DEVICE_KEY=<promoted key> dotnet test   # + 5 contract tests
+```
 
 ## 1. Create the project
 
-1. Unity Hub → New Project → **3D (URP)**, Unity **2023 LTS** or **6000 LTS**.
-2. Name it to match this folder (`client-unity`) and create it one level up from this repo, or
-   create it here and let Unity populate `Assets/`, `ProjectSettings/`, `Packages/manifest.json`
-   around the files already in this folder — either works, Unity will merge with what exists.
+1. Unity Hub → New Project → **Unity 6 (6000.0 LTS or later)**, template **AR Mobile** (or 3D URP).
+2. Create it in this folder (`client-unity`), so Unity builds `Library/`, `ProjectSettings/` etc.
+   around the existing `Assets/` and `Packages/manifest-additions.json`. Everything Unity generates
+   is already in `.gitignore`.
+3. Merge `Packages/manifest-additions.json` into the generated `Packages/manifest.json`. At minimum
+   **`com.unity.nuget.newtonsoft-json`** — Core doesn't compile without it.
 
-## 2. Install required packages (Package Manager → Add package by name)
+## 2. Project settings
 
-- `com.unity.xr.arfoundation` — AR Foundation (SR-VIS-01/02, SR-GEO-03)
-- `com.unity.xr.arcore` — ARCore XR Plugin (Android)
-- `com.unity.xr.arkit` — ARKit XR Plugin (iOS)
-- **ARCore Extensions** (Google's separate package, installed via its own tarball/git URL per
-  Google's current instructions — not in the main registry) for the Geospatial API used in
-  SR-GEO-03. See `Packages/manifest-additions.json` in this folder for the exact entries to
-  merge into your generated `Packages/manifest.json`.
-- If using Niantic Lightship VPS instead of/alongside ARCore Geospatial: install the Lightship
-  ARDK package per Niantic's current SDK instructions.
+- **Player → Other Settings → Active Input Handling: Both.** The location service is the legacy
+  `Input.location`; AR templates often default to the new Input System only.
+- XR Plug-in Management: enable ARCore (Android) / ARKit (iOS).
+- Android: min API per ARCore's current requirement; iOS: 13+. LiDAR is **not** required (SR-VIS-02).
+- iOS: set *Location Usage Description* (Player → Other Settings) — required for `Input.location`.
+- ARCore Extensions config (Project Settings → XR → ARCore Extensions): enable **Geospatial** and
+  set up authorization (API key or keyless) per Google's Geospatial docs. Without it, `EarthState`
+  reports an error and the app falls back to GPS, which is handled — just not sub-meter.
 
-## 3. Project settings
+## 3. Play it in the Editor first
 
-- Player Settings → enable ARCore (Android) / ARKit (iOS) support under XR Plug-in Management.
-- Android: minimum API level per SR-GEO-03/CR-01 hardware requirements (ARCore-supported,
-  Android 8+ per the broad-compatibility decision in requirements §6.7).
-- iOS: minimum iOS 13+ (broad tier) — LiDAR is NOT required (SR-VIS-02 covers non-LiDAR devices).
+1. Bring the server up and seed a trail (from the repo root):
+   ```bash
+   JWT_SECRET=$(openssl rand -hex 32) docker compose up --build -d
+   docker compose exec api node dist/jobs/seedFieldTestTrail.js --lat 13.0827 --lng 80.2707 --code SWAN42
+   ```
+2. New scene → empty GameObject → add **`QuestBootstrap`**. Set *Api Base Url* to
+   `http://127.0.0.1:3000` (the Editor may use plain http; phones may not) and *Trail Id* from the
+   seed output. Set the simulated start a little west of the first pin's coordinates.
+3. Press Play. The HUD shows position source, connectivity, the active pin with distance and
+   direction, and an **Editor walker**: tick *Walk to the active pin* and watch the dwell count up,
+   the server confirm, and the next pin unlock. Try the code pin with a wrong code, then the right
+   one typed sloppily (`swan 42`). Tick *Simulate airplane mode* mid-trail to exercise SR-NET-02.
 
-## 4. Script stubs in `Assets/Scripts/`
+That run covers the whole loop against the real server — everything except AR and real GPS.
 
-Each file below is a skeleton — class shape, dependencies, and requirement-ID comments, not a
-finished implementation. Fill them in against the server API (`../server/`) once its unit tests
-pass, per the build order in `../CLAUDE.md`.
+## 4. The AR scene for a device (ST-4.3)
 
-| File | Requirement(s) | Purpose |
+1. Add **AR Session** and **XR Origin (AR)** (GameObject → XR).
+2. On the XR Origin: **AR Anchor Manager**, **AR Earth Manager** (ARCore Extensions), and
+   **`ArCoreGeospatialProvider`** (wire both managers, or leave them empty to auto-find).
+3. On the AR Camera: **AR Occlusion Manager** and **`ArFoundationDepthProvider`**.
+4. Keep the `QuestBootstrap` object; set *Api Base Url* to your **https** tunnel URL.
+5. Build to the phone and walk the seeded trail. Per requirements §7, note per device: time to VPS
+   (status line), whether the GPS fallback kicked in, and whether "move closer" / "GPS signal weak"
+   fired when expected.
+
+## Requirements → where they live
+
+| Requirement | Core (tested) | Unity layer |
 | --- | --- | --- |
-| `TrailManager.cs` | GDR-01, GDR-06/07 | Fetches/caches a trail (SR-NET-01), tracks current attempt and sequence position |
-| `PinController.cs` | GDR-01, SR-GEO-01/02 | Places a single pin's AR anchor at the correct local-origin offset; enabled/disabled by lock state |
-| `ProximityDwellChallenge.cs` | GDR-02 | The first challenge type to implement — dwell-time-in-radius check, using SR-GEO-04's effective radius |
-| `VpsLocalizationService.cs` | SR-GEO-03, SR-NET-03 | Wraps ARCore Geospatial/Lightship VPS queries; falls back to GPS-only per SR-NET-03 when VPS is unavailable |
-| `OcclusionFallbackController.cs` | SR-VIS-01, SR-VIS-02 | Picks hardware occlusion vs. the distance-fade fallback depending on device depth capability |
+| GDR-01 sequencing | `TrailProgress` | `PinController` (only the active pin is a target) |
+| GDR-02 proximity_dwell | `DwellTracker` | `ProximityDwellChallenge` |
+| GDR-04/06 summary, replay | `QuestSession.ReplayAsync` | `QuestHud` |
+| GDR-07 version resume | `QuestSession` + versions endpoint | — |
+| GDR-09 report | `QuestApiClient.ReportPinAsync` | `QuestHud` |
+| SR-GEO-02/ST-3.2 ENU offset | `GeoMath.ToEnu` | `PinController` (Editor placement) |
+| SR-GEO-03 VPS thresholds, SR-NET-03 fallback | `PositionSourceSelector` | `VpsLocalizationService`, `ArCoreGeospatialProvider` |
+| SR-GEO-04 radius rule + weak-GPS hint | `CompletionRules` | `QuestHud` |
+| SR-NET-01 trail cache | `TrailCache` | — |
+| SR-NET-02 offline queue (ST-9.1) | `CompletionOutbox` | `TrailManager` (retry on reconnect) |
+| CR-04 / ST-9.2 indicators | `PositionEstimate.IsReducedPrecision`, `IsOffline` | `QuestHud` status lines |
+| SR-SEC-02 inputs | `LocationHistoryBuffer` | `QuestBootstrap` (every fix; foreground = session start) |
+| SR-VIS-01/02 occlusion | `DistanceFade` | `OcclusionFallbackController`, `ArFoundationDepthProvider` |
+| SR-PRIV-02 delete my data | `QuestSession.DeleteMyDataAsync` | `QuestHud` |
+| ST-6.2 code entry | server-verified; `ChallengeTypes.CanVerifyOnDevice` | `QuestHud`, `QuestBootstrap.SubmitCodeAsync` |
 
-## 5. First playable slice
+## Known limits — before launch, not before the field test
 
-Per the sequencing plan: get `ProximityDwellChallenge` + `VpsLocalizationService` (or GPS-only
-fallback) working end-to-end against the server's trail-fetch and pin-complete endpoints before
-touching occlusion (`OcclusionFallbackController`) or the other challenge types at all.
+- **The device key sits in the app sandbox** (`persistentDataPath`), not iOS Keychain / Android
+  Keystore. Fine for a field test; for launch it needs a native secure-storage plugin. Since the key
+  *is* the account (ST-2.6), losing or leaking it loses or leaks the player.
+- **The HUD is IMGUI** — a field-test UI that needs no scene wiring, not the shipping design.
+- **Pins are hidden, not approximated, without VPS.** SR-GEO-03 renders anchored pins only at
+  ≤0.5m/≤5°; on GPS the HUD gives distance and direction instead, and gameplay continues.
+- **SR-GEO-01 floating-origin re-centring is deferred** (approved): ENU offsets are accurate across a
+  few kilometres, ample for the field test.
+- **The VPS timeout is 5s** `[ASSUMED]`. ARCore Geospatial often needs longer to reach 0.5m; the
+  selector switches back to VPS the moment it qualifies, so a short timeout only means starting on GPS.
+- **ST-6.1 photo pins** are refused by the server; the HUD says so rather than offering a dead button.

@@ -1,57 +1,53 @@
 using System;
+using ArQuestTrail.Core;
 using UnityEngine;
 
 namespace ArQuestTrail
 {
     /// <summary>
-    /// Wraps ARCore Geospatial API / Niantic Lightship VPS localization, and falls back to
-    /// GPS-only positioning when VPS is unavailable or times out.
-    /// Requirements: SR-GEO-03 (VPS accuracy thresholds), SR-NET-03 (VPS-unavailable fallback).
+    /// Combines ARCore Geospatial (VPS) with GPS each frame and publishes the position gameplay
+    /// should use. The decision itself — SR-GEO-03's thresholds, SR-NET-03's timed fallback, never
+    /// tightening GPS's accuracy figure — is <see cref="PositionSourceSelector"/>, which is unit
+    /// tested in Core; this component only feeds it Unity's inputs.
     /// </summary>
     public class VpsLocalizationService : MonoBehaviour
     {
-        public enum PositionSource { Vps, GpsFallback, Unavailable }
-
+        [Tooltip("Seconds to wait for VPS before SR-NET-03's GPS fallback. [ASSUMED: 5s] — ARCore " +
+                 "Geospatial often needs longer to reach 0.5m; the selector switches back the moment it does.")]
         [SerializeField] private float vpsTimeoutSeconds = 5f;
-        [SerializeField] private double maxHorizontalAccuracyMeters = 0.5; // SR-GEO-03
-        [SerializeField] private double maxHeadingAccuracyDegrees = 5.0;   // SR-GEO-03
 
-        public event Action<PositionResult> OnPositionUpdated;
+        private PositionSourceSelector _selector;
+        private ILocationSource _gps;
 
-        private float _vpsAttemptStartedAt = -1f;
+        public PositionEstimate Current { get; private set; }
 
+        public string GpsStatus => _gps?.Status ?? "No location source";
+
+        public event Action<PositionEstimate> OnPositionUpdated;
+
+        public void Initialize(ILocationSource gps)
+        {
+            _gps = gps;
+            _selector = new PositionSourceSelector(TimeSpan.FromSeconds(vpsTimeoutSeconds));
+            RequestLocalization();
+        }
+
+        /// <summary>Restart the VPS wait — on launch and every return to the foreground.</summary>
         public void RequestLocalization()
         {
-            _vpsAttemptStartedAt = Time.time;
-            // TODO: call into ARCore Geospatial API (or Lightship VPS) for a localization
-            // attempt. On success meeting SR-GEO-03's thresholds, emit PositionSource.Vps.
-            // On failure or once vpsTimeoutSeconds elapses, call FallBackToGps().
+            _selector?.RequestLocalization(DateTimeOffset.UtcNow);
         }
 
-        private void FallBackToGps()
+        private void Update()
         {
-            // SR-NET-03: reduced precision, but the app must say so rather than pretend the
-            // pin is still sub-meter accurate. Feed this through to the challenge's
-            // reportedAccuracyMeters (see ProximityDwellChallenge / SR-GEO-04) unchanged —
-            // don't fake a tighter accuracy value to make the UI look better.
-            // TODO: read Input.location (or the platform equivalent) and emit GpsFallback with
-            // its native accuracy figure.
-        }
-
-        public readonly struct PositionResult
-        {
-            public readonly PositionSource Source;
-            public readonly double Lat;
-            public readonly double Lng;
-            public readonly double HorizontalAccuracyMeters;
-
-            public PositionResult(PositionSource source, double lat, double lng, double horizontalAccuracyMeters)
+            if (_selector == null)
             {
-                Source = source;
-                Lat = lat;
-                Lng = lng;
-                HorizontalAccuracyMeters = horizontalAccuracyMeters;
+                return;
             }
+
+            VpsReading? vps = ArIntegrations.Geospatial?.CurrentReading;
+            Current = _selector.Update(vps, _gps?.Latest, DateTimeOffset.UtcNow);
+            OnPositionUpdated?.Invoke(Current);
         }
     }
 }

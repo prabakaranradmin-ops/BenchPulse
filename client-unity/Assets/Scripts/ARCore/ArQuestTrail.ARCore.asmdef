@@ -1,0 +1,28 @@
+{
+    "name": "ArQuestTrail.ARCore",
+    "rootNamespace": "ArQuestTrail",
+    "references": [
+        "ArQuestTrail",
+        "ArQuestTrail.Core",
+        "Unity.XR.ARFoundation",
+        "Unity.XR.ARSubsystems",
+        "Google.XR.ARCoreExtensions"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "ARQT_ARCORE_EXTENSIONS"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.google.ar.core.arfoundation.extensions",
+            "expression": "1.0.0",
+            "define": "ARQT_ARCORE_EXTENSIONS"
+        }
+    ],
+    "noEngineReferences": false
+}

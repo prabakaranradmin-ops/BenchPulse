@@ -1,46 +1,80 @@
+using ArQuestTrail.Core;
 using UnityEngine;
 
 namespace ArQuestTrail
 {
     /// <summary>
-    /// Picks real depth-based occlusion where the device supports it, and a distance-based
-    /// visual fallback everywhere else, so gameplay stays fair across device tiers rather than
-    /// gating occlusion quality on hardware. This is a polish/fairness concern, not a
-    /// gameplay-blocking one — proximity_dwell doesn't require line-of-sight to a pin.
-    /// Requirements: SR-VIS-01 (hardware occlusion), SR-VIS-02 (fallback).
+    /// SR-VIS-01 / SR-VIS-02. Where the device has real environment depth, AR Foundation's
+    /// occlusion hides pins behind buildings and this does nothing. Everywhere else it applies the
+    /// distance cue instead — so gameplay stays fair across device tiers rather than gating on
+    /// hardware (proximity_dwell never needs line of sight).
     /// </summary>
     public class OcclusionFallbackController : MonoBehaviour
     {
-        [SerializeField] private Renderer pinRenderer;
-        [SerializeField] private float fadeStartDistanceMeters = 15f; // [ASSUMED in spec — confirm]
+        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor"); // URP
+        private static readonly int ColorId = Shader.PropertyToID("_Color");         // Built-in
 
-        private bool _hasHardwareDepth;
+        [Tooltip("SR-VIS-02 [ASSUMED: ~15m]. Styling is a visual-design call; this is a placeholder default.")]
+        [SerializeField] private float fadeStartMeters = 15f;
 
-        private void Start()
+        [SerializeField] private float fadeEndMeters = 60f;
+
+        private Transform _target;
+        private Renderer _renderer;
+        private Vector3 _baseScale = Vector3.one;
+        private MaterialPropertyBlock _block;
+        private DistanceFade _fade;
+
+        public void SetTarget(Transform target, Renderer renderer)
         {
-            // TODO: query AR Foundation's AROcclusionManager for environment depth support
-            // (works on many non-LiDAR Android devices via stereo estimation, not just
-            // LiDAR/ToF). Set _hasHardwareDepth accordingly.
+            _target = target;
+            _renderer = renderer;
+            _baseScale = target != null ? target.localScale : Vector3.one;
+            _block = new MaterialPropertyBlock();
+            _fade = new DistanceFade(fadeStartMeters, fadeEndMeters);
         }
 
-        private void Update()
+        private void LateUpdate()
         {
-            if (_hasHardwareDepth)
+            if (_target == null || !_target.gameObject.activeInHierarchy)
             {
-                // SR-VIS-01: handled by the AR occlusion shader/AROcclusionManager directly —
-                // nothing to do here per-frame beyond making sure it's enabled.
                 return;
             }
 
-            ApplyDistanceFade();
+            bool hardwareDepth = ArIntegrations.Depth != null && ArIntegrations.Depth.HasEnvironmentDepth;
+            Camera viewer = Camera.main;
+            if (hardwareDepth || viewer == null)
+            {
+                Apply(1, 1);
+                return;
+            }
+
+            float distance = Vector3.Distance(viewer.transform.position, _target.position);
+            Apply((float)_fade.Alpha(distance), (float)_fade.Scale(distance));
         }
 
-        private void ApplyDistanceFade()
+        /// <summary>
+        /// Scale always shows. Alpha only shows on a transparent material — the default marker is
+        /// opaque, so give the pin prefab a transparent material for the full SR-VIS-02 cue.
+        /// </summary>
+        private void Apply(float alpha, float scale)
         {
-            // SR-VIS-02: opacity fade + slight scale-down beyond fadeStartDistanceMeters.
-            // TODO: compute distance from camera to this pin, drive a shader property or
-            // material alpha. Exact cue styling (fade vs. outline vs. scale) is a visual-design
-            // decision, not fixed by the requirements doc — this is a placeholder default.
+            _target.localScale = _baseScale * scale;
+            if (_renderer == null)
+            {
+                return;
+            }
+
+            _renderer.GetPropertyBlock(_block);
+            Color color = _renderer.sharedMaterial != null && _renderer.sharedMaterial.HasProperty(BaseColorId)
+                ? _renderer.sharedMaterial.GetColor(BaseColorId)
+                : _renderer.sharedMaterial != null && _renderer.sharedMaterial.HasProperty(ColorId)
+                    ? _renderer.sharedMaterial.GetColor(ColorId)
+                    : Color.white;
+            color.a = alpha;
+            _block.SetColor(BaseColorId, color);
+            _block.SetColor(ColorId, color);
+            _renderer.SetPropertyBlock(_block);
         }
     }
 }
