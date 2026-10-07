@@ -413,6 +413,16 @@ describeIfDatabase('postgresStore against real Postgres+PostGIS (ST-2.7)', () =>
       headers: auth,
     });
     expect(asPlayer.json().pins).toHaveLength(3);
+
+    // Someone mid-trail on v1 can still fetch v1's coordinates after v2 replaced it.
+    const replaced = await app.inject({
+      method: 'GET',
+      url: `/api/v1/trails/${authoredTrailId}/versions/${v1.json().trailVersionId}`,
+      headers: auth,
+    });
+    expect(replaced.statusCode).toBe(200);
+    expect(replaced.json()).toMatchObject({ versionNumber: 1, isCurrentVersion: false });
+    expect(replaced.json().pins).toHaveLength(2);
   });
 
   it('lists and triages the pin report queue as an Admin (ST-7.3)', async () => {

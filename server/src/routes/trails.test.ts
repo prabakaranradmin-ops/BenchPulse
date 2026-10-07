@@ -120,4 +120,155 @@ describe('GET /api/v1/trails/:trailId (ST-2.1, SR-NET-01)', () => {
 
     expect(response.statusCode).toBe(401);
   });
+
+  it('marks the payload as the current version', async () => {
+    const trail = seedTrail({ pins: [{ id: 'pin-1', sequenceIndex: 1, eastMeters: 0 }] });
+    ctx = await buildTestApp(seedState(trail));
+
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/v1/trails/trail-1',
+      headers: ctx.authHeader(PLAYER),
+    });
+
+    expect(response.json().isCurrentVersion).toBe(true);
+  });
+});
+
+describe('GET /api/v1/trails/:trailId/versions/:trailVersionId (GDR-07, CR-02)', () => {
+  /** Version 1 has two pins; the Admin then republished as version 2 with three. */
+  function republishedTrail() {
+    return seedState(
+      seedTrail({
+        versionId: 'version-1',
+        versionNumber: 1,
+        pins: [
+          { id: 'v1-pin-1', sequenceIndex: 1, eastMeters: 0 },
+          { id: 'v1-pin-2', sequenceIndex: 2, eastMeters: 300 },
+        ],
+      }),
+      seedTrail({
+        versionId: 'version-2',
+        versionNumber: 2,
+        pins: [
+          { id: 'v2-pin-1', sequenceIndex: 1, eastMeters: 0 },
+          { id: 'v2-pin-2', sequenceIndex: 2, eastMeters: 400 },
+          { id: 'v2-pin-3', sequenceIndex: 3, eastMeters: 800 },
+        ],
+      }),
+    );
+  }
+
+  it('serves a replaced version so a mid-trail player can still render their pins', async () => {
+    ctx = await buildTestApp(republishedTrail());
+
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/v1/trails/trail-1/versions/version-1',
+      headers: ctx.authHeader(PLAYER),
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      trailId: 'trail-1',
+      trailVersionId: 'version-1',
+      versionNumber: 1,
+      isCurrentVersion: false,
+    });
+    expect(response.json().pins.map((p: { pinId: string }) => p.pinId)).toEqual([
+      'v1-pin-1',
+      'v1-pin-2',
+    ]);
+  });
+
+  it('serves the current version too, flagged as current', async () => {
+    ctx = await buildTestApp(republishedTrail());
+
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/v1/trails/trail-1/versions/version-2',
+      headers: ctx.authHeader(PLAYER),
+    });
+
+    expect(response.json()).toMatchObject({ versionNumber: 2, isCurrentVersion: true });
+    expect(response.json().pins).toHaveLength(3);
+  });
+
+  it('withholds code answers exactly like the current-version route', async () => {
+    ctx = await buildTestApp(
+      seedState(
+        seedTrail({
+          pins: [
+            {
+              id: 'pin-1',
+              sequenceIndex: 1,
+              eastMeters: 0,
+              challengeType: 'code_entry',
+              challengeConfig: { code: 'SWAN42', hint: 'Read the plaque' },
+            },
+          ],
+        }),
+      ),
+    );
+
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/v1/trails/trail-1/versions/version-1',
+      headers: ctx.authHeader(PLAYER),
+    });
+
+    expect(response.body).not.toContain('SWAN42');
+    expect(response.json().pins[0].challenge).toEqual({ hint: 'Read the plaque' });
+  });
+
+  it('404s a version id that belongs to a different trail, rather than serving it', async () => {
+    ctx = await buildTestApp(
+      seedState(
+        seedTrail({ pins: [{ id: 'pin-1', sequenceIndex: 1, eastMeters: 0 }] }),
+        seedTrail({
+          trailId: 'trail-2',
+          versionId: 'other-version',
+          pins: [{ id: 'other-pin', sequenceIndex: 1, eastMeters: 0 }],
+        }),
+      ),
+    );
+
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/v1/trails/trail-1/versions/other-version',
+      headers: ctx.authHeader(PLAYER),
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: 'trail_version_not_found' });
+  });
+
+  it('404s an unknown version and an unknown trail', async () => {
+    ctx = await buildTestApp(republishedTrail());
+
+    const unknownVersion = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/v1/trails/trail-1/versions/nope',
+      headers: ctx.authHeader(PLAYER),
+    });
+    const unknownTrail = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/v1/trails/nope/versions/version-1',
+      headers: ctx.authHeader(PLAYER),
+    });
+
+    expect(unknownVersion.json()).toEqual({ error: 'trail_version_not_found' });
+    expect(unknownTrail.json()).toEqual({ error: 'trail_not_found' });
+  });
+
+  it('401s an unauthenticated request (ST-2.5)', async () => {
+    ctx = await buildTestApp(republishedTrail());
+
+    const response = await ctx.app.inject({
+      method: 'GET',
+      url: '/api/v1/trails/trail-1/versions/version-1',
+    });
+
+    expect(response.statusCode).toBe(401);
+  });
 });
