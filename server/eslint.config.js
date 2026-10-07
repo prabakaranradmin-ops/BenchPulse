@@ -37,8 +37,8 @@ export default tseslint.config(
     },
   },
   {
-    // The config file isn't part of tsconfig's program, so type-aware rules can't parse it.
-    files: ['eslint.config.js'],
+    // Tool config files aren't part of tsconfig's program, so type-aware rules can't parse them.
+    files: ['eslint.config.js', 'vitest.config.mjs'],
     extends: [tseslint.configs.disableTypeChecked],
   },
   {
