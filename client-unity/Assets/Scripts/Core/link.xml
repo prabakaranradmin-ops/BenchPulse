@@ -1,0 +1,8 @@
+<!--
+  IL2CPP strips code it can't see being used. Newtonsoft builds the API DTOs through
+  reflection, so without this the release build deserializes every response into empty
+  objects — a failure that never shows up in the Editor, only on a device.
+-->
+<linker>
+  <assembly fullname="ArQuestTrail.Core" preserve="all" />
+</linker>
