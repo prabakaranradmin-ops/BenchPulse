@@ -186,19 +186,21 @@ ignored by other challenge types.
 
 Rejections are distinguishable so the client can show the right hint:
 
-| Status | `error`                                  | Meaning                                                                                                     |
-| ------ | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| 404    | `attempt_not_found`                      | Missing, or belongs to another player — deliberately not 403, so attempt ids aren't probeable (SR-DATA-02). |
-| 404    | `pin_not_in_attempt`                     | Pin isn't part of this attempt's trail version.                                                             |
-| 409    | `pin_locked`                             | Skipping ahead; finish the current pin first (GDR-01).                                                      |
-| 409    | `pin_already_completed`                  | Also returned when a concurrent double-submit loses the write-time race.                                    |
-| 409    | `attempt_expired` / `attempt_not_active` | GDR-08.                                                                                                     |
-| 422    | `accuracy_exceeds_ceiling`               | Accuracy above the 50m ceiling — client shows "GPS signal weak — move to open sky" (SR-GEO-04).             |
-| 422    | `outside_effective_radius`               | Response carries `distanceM` and `effectiveRadiusM` for a "move closer" hint.                               |
-| 422    | `challenge_answer_required`              | A `code_entry` pin with no `challengeAnswer` sent (ST-6.2).                                                 |
-| 422    | `incorrect_code`                         | Wrong code. Unlimited retries, no lockout (GDR-10).                                                         |
-| 409    | `challenge_not_configured`               | A `code_entry` pin the Admin published without a code — an authoring fault, not the player's.               |
-| 409    | `challenge_type_not_implemented`         | `photo_confirmation`, until ST-6.1 lands.                                                                   |
+| Status | `error`                                  | Meaning                                                                                                        |
+| ------ | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| 404    | `attempt_not_found`                      | Missing, or belongs to another player — deliberately not 403, so attempt ids aren't probeable (SR-DATA-02).    |
+| 404    | `pin_not_in_attempt`                     | Pin isn't part of this attempt's trail version.                                                                |
+| 409    | `pin_locked`                             | Skipping ahead; finish the current pin first (GDR-01).                                                         |
+| 409    | `pin_already_completed`                  | Also returned when a concurrent double-submit loses the write-time race.                                       |
+| 409    | `attempt_expired` / `attempt_not_active` | GDR-08.                                                                                                        |
+| 422    | `accuracy_exceeds_ceiling`               | Accuracy above the 50m ceiling — client shows "GPS signal weak — move to open sky" (SR-GEO-04).                |
+| 422    | `outside_effective_radius`               | Response carries `distanceM` and `effectiveRadiusM` for a "move closer" hint.                                  |
+| 422    | `recorded_at_in_future`                  | `recordedAt` is more than 5 minutes ahead of the server's clock — impossible, not merely late (SR-NET-02).     |
+| 422    | `recorded_at_before_attempt`             | `recordedAt` is more than 5 minutes before the attempt began. Would otherwise yield negative time-to-complete. |
+| 422    | `challenge_answer_required`              | A `code_entry` pin with no `challengeAnswer` sent (ST-6.2).                                                    |
+| 422    | `incorrect_code`                         | Wrong code. Unlimited retries, no lockout (GDR-10).                                                            |
+| 409    | `challenge_not_configured`               | A `code_entry` pin the Admin published without a code — an authoring fault, not the player's.                  |
+| 409    | `challenge_type_not_implemented`         | `photo_confirmation`, until ST-6.1 lands.                                                                      |
 
 On success the response includes `nextPinId` (null on the final pin), `attemptStatus`
 (`completed` when the last pin lands, GDR-04), and `locationFlag` — non-null when SR-SEC-02

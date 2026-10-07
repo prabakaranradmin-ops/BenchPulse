@@ -199,7 +199,8 @@ describe('POST /api/v1/attempts/:attemptId/pins/:pinId/complete (ST-2.3)', () =>
     );
     const attemptId = await startAttempt(ctx, PLAYER_A);
 
-    const firstSampleAt = new Date('2026-03-01T10:00:00Z');
+    // The 30 seconds leading up to now — capture times have to be possible (SR-NET-02).
+    const firstSampleAt = new Date(Date.now() - 30_000);
     const history = Array.from({ length: sampleCount }, (_, i) => ({
       lat: 0,
       lng: lngAtMeters(speedMps * intervalSeconds * i),
@@ -228,7 +229,8 @@ describe('POST /api/v1/attempts/:attemptId/pins/:pinId/complete (ST-2.3)', () =>
     ctx = await buildTestApp(seedState(seedTrail(TWO_PIN_TRAIL)));
     const attemptId = await startAttempt(ctx, PLAYER_A);
 
-    const firstSampleAt = new Date('2026-03-01T10:00:00Z');
+    // The 30 seconds leading up to now — capture times have to be possible (SR-NET-02).
+    const firstSampleAt = new Date(Date.now() - 30_000);
     const history = Array.from({ length: 7 }, (_, i) => ({
       lat: 0,
       lng: lngAtMeters(-1.4 * 5 * (6 - i)), // walking east toward the pin at ~1.4 m/s
@@ -251,7 +253,8 @@ describe('POST /api/v1/attempts/:attemptId/pins/:pinId/complete (ST-2.3)', () =>
   it('stores location samples at their capture time, not receipt time (SR-NET-02)', async () => {
     ctx = await buildTestApp(seedState(seedTrail(TWO_PIN_TRAIL)));
     const attemptId = await startAttempt(ctx, PLAYER_A);
-    // A completion that happened offline ten minutes ago and is only now being submitted.
+    // Started half an hour ago; completed offline ten minutes ago; only now submitted.
+    ctx.store.state.attempts[0].startedAt = new Date(Date.now() - 30 * 60 * 1000);
     const capturedAt = new Date(Date.now() - 10 * 60 * 1000);
 
     const response = await completePin(ctx, {
@@ -273,7 +276,7 @@ describe('POST /api/v1/attempts/:attemptId/pins/:pinId/complete (ST-2.3)', () =>
   it('does not re-store a sample it already holds at that capture time (SR-PRIV-01)', async () => {
     ctx = await buildTestApp(seedState(seedTrail(TWO_PIN_TRAIL)));
     const attemptId = await startAttempt(ctx, PLAYER_A);
-    const at = new Date('2026-03-01T10:00:00Z');
+    const at = new Date(Date.now() - 60_000);
     const history = [
       { lat: 0, lng: 0, recordedAt: new Date(at.getTime() - 10_000) },
       { lat: 0, lng: 0, recordedAt: at },
@@ -297,6 +300,57 @@ describe('POST /api/v1/attempts/:attemptId/pins/:pinId/complete (ST-2.3)', () =>
 
     const times = ctx.store.state.locationHistory.map((row) => row.recordedAt.getTime());
     expect(new Set(times).size).toBe(times.length);
+  });
+
+  it('rejects a capture time in the future and writes nothing (SR-NET-02)', async () => {
+    ctx = await buildTestApp(seedState(seedTrail(TWO_PIN_TRAIL)));
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+
+    const response = await completePin(ctx, {
+      userId: PLAYER_A,
+      attemptId,
+      pinId: 'pin-1',
+      recordedAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toEqual({ error: 'recorded_at_in_future' });
+    expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('unlocked');
+    expect(ctx.store.state.locationHistory).toHaveLength(0);
+  });
+
+  it('rejects a capture time from before the attempt began (SR-PRIV-03 time-to-complete)', async () => {
+    ctx = await buildTestApp(seedState(seedTrail(TWO_PIN_TRAIL)));
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+
+    const response = await completePin(ctx, {
+      userId: PLAYER_A,
+      attemptId,
+      pinId: 'pin-1',
+      recordedAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toEqual({ error: 'recorded_at_before_attempt' });
+    expect(progressFor(ctx, attemptId, 'pin-1')?.status).toBe('unlocked');
+  });
+
+  it('cannot dodge GDR-08 expiry with a capture time older than the attempt', async () => {
+    // Expired a day ago; claiming the fix happened "before the trail even started" must not
+    // slip it in under the window.
+    ctx = await buildTestApp(seedState(seedTrail({ ...TWO_PIN_TRAIL, expiryDays: 1 })));
+    const attemptId = await startAttempt(ctx, PLAYER_A);
+    ctx.store.state.attempts[0].startedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+
+    const response = await completePin(ctx, {
+      userId: PLAYER_A,
+      attemptId,
+      pinId: 'pin-1',
+      recordedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json()).toEqual({ error: 'recorded_at_before_attempt' });
   });
 
   it('400s an unparseable timestamp', async () => {

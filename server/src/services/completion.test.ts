@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   ACCURACY_CEILING_M,
+  CAPTURE_TIME_TOLERANCE_MS,
+  evaluateCaptureTime,
   evaluateCompletionPosition,
   evaluateSequence,
   isAttemptExpired,
@@ -145,5 +147,54 @@ describe('isAttemptExpired (GDR-08)', () => {
     expect(
       isAttemptExpired({ status: 'completed', startedAt }, 7, new Date('2026-02-01T00:00:00Z')),
     ).toBe(false);
+  });
+});
+
+describe('evaluateCaptureTime (SR-NET-02)', () => {
+  const startedAt = new Date('2026-05-01T09:00:00Z');
+  const now = new Date('2026-05-03T09:00:00Z');
+  const minutes = (n: number) => n * 60 * 1000;
+
+  it('accepts a completion captured offline long ago, as long as it is after the attempt began', () => {
+    // Two days in a queue is exactly what SR-NET-02 exists for.
+    const result = evaluateCaptureTime({
+      recordedAt: new Date(startedAt.getTime() + minutes(30)),
+      attemptStartedAt: startedAt,
+      now,
+    });
+
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('rejects a capture time in the future', () => {
+    const result = evaluateCaptureTime({
+      recordedAt: new Date(now.getTime() + CAPTURE_TIME_TOLERANCE_MS + 1),
+      attemptStartedAt: startedAt,
+      now,
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'recorded_at_in_future' });
+  });
+
+  it('rejects a capture time before the attempt existed', () => {
+    // Would otherwise become a negative time-to-complete in SR-PRIV-03's medians.
+    const result = evaluateCaptureTime({
+      recordedAt: new Date(startedAt.getTime() - CAPTURE_TIME_TOLERANCE_MS - 1),
+      attemptStartedAt: startedAt,
+      now,
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'recorded_at_before_attempt' });
+  });
+
+  it('absorbs ordinary clock skew at both ends', () => {
+    for (const recordedAt of [
+      new Date(now.getTime() + minutes(4)),
+      new Date(startedAt.getTime() - minutes(4)),
+    ]) {
+      expect(evaluateCaptureTime({ recordedAt, attemptStartedAt: startedAt, now })).toEqual({
+        ok: true,
+      });
+    }
   });
 });

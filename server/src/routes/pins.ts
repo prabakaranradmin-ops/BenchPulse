@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authenticate, userIdOf } from '../plugins/auth.js';
 import { checkLocationSanity, type LocationSample } from '../services/locationSanityCheck.js';
 import {
+  evaluateCaptureTime,
   evaluateCompletionPosition,
   evaluateSequence,
   isAttemptExpired,
@@ -116,6 +117,17 @@ export async function pinRoutes(app: FastifyInstance): Promise<void> {
       const attempt = await app.store.getAttempt(attemptId);
       if (!attempt || attempt.userId !== userId) {
         return reply.code(404).send({ error: 'attempt_not_found' });
+      }
+
+      // SR-NET-02: a capture time may be long past, but never impossible. Checked before the
+      // GDR-08 expiry test below, which is judged at this very timestamp.
+      const capture = evaluateCaptureTime({
+        recordedAt: fixAt,
+        attemptStartedAt: attempt.startedAt,
+        now: new Date(),
+      });
+      if (!capture.ok) {
+        return reply.code(422).send({ error: capture.reason });
       }
 
       // GDR-08: an attempt past its trail's validity window is marked expired, not deleted —

@@ -42,6 +42,40 @@ export function evaluateCompletionPosition(input: {
   return { ok: true, reason: 'within_effective_radius', effectiveRadiusM, distanceM };
 }
 
+/** Device clocks drift; this much either way is skew, not an impossible time `[ASSUMED: 5 minutes]`. */
+export const CAPTURE_TIME_TOLERANCE_MS = 5 * 60 * 1000;
+
+export type CaptureTimeEvaluation =
+  { ok: true } | { ok: false; reason: 'recorded_at_in_future' | 'recorded_at_before_attempt' };
+
+/**
+ * SR-NET-02 lets an offline completion arrive long after it happened, stamped with when it
+ * happened. What that stamp can't be is *impossible*: later than now, or earlier than the attempt
+ * it completes. Rejecting those keeps a skewed or forged clock from producing a negative
+ * time-to-complete in SR-PRIV-03's analytics, or a completion dated before the attempt existed.
+ *
+ * A plausible past time is accepted by design — it is exactly what a truthful offline capture
+ * looks like. Telling one from a fabricated time needs device attestation, which §6.4 defers, so
+ * the remaining exposure (e.g. back-dating inside GDR-08's window) is the trust model the spec chose.
+ */
+export function evaluateCaptureTime(input: {
+  recordedAt: Date;
+  attemptStartedAt: Date;
+  now: Date;
+  toleranceMs?: number;
+}): CaptureTimeEvaluation {
+  const tolerance = input.toleranceMs ?? CAPTURE_TIME_TOLERANCE_MS;
+  const recorded = input.recordedAt.getTime();
+
+  if (recorded > input.now.getTime() + tolerance) {
+    return { ok: false, reason: 'recorded_at_in_future' };
+  }
+  if (recorded < input.attemptStartedAt.getTime() - tolerance) {
+    return { ok: false, reason: 'recorded_at_before_attempt' };
+  }
+  return { ok: true };
+}
+
 export type SequenceEvaluation =
   | { ok: true; nextPinId: string | null }
   | { ok: false; reason: 'pin_not_in_attempt' | 'pin_already_completed' | 'pin_locked' };
