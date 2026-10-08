@@ -1,16 +1,16 @@
 # Client (Unity)
 
-The player app. Unity projects are created through Unity Hub, so this folder isn't a complete
-Unity project yet — it holds everything that goes *into* one: the scripts, their assembly
-definitions, and the package list. See `../docs/requirements-v1.0.md` §6 for the requirement IDs
-referenced throughout.
+The player app — a Unity project, pinned to **Unity 6.0 LTS (6000.0.84f1)**: open this folder
+in Unity Hub (Add → Add project from disk). See `../docs/requirements-v1.0.md` §6 for the
+requirement IDs referenced throughout.
 
 ## How the code is organised
 
 | Folder | Assembly | What it is | How it's verified |
 | --- | --- | --- | --- |
 | `Assets/Scripts/Core/` | `ArQuestTrail.Core` | All client logic: API client and tokens, the SR-GEO-04 rule, dwell timing, VPS/GPS selection, offline outbox, caching, progress, join codes, the My trails list, and which screen leads where. **No `UnityEngine`.** | 166 unit tests + 6 contract tests against the real server (`dotnet/`), run in CI |
-| `Assets/Scripts/*.cs`, `Platform/` | `ArQuestTrail` | Thin MonoBehaviours: feed Unity's inputs into Core, draw the results — the app's screens (`AppScreens`) and the play screen (`QuestHud`) | Type-checked against Unity 2021.3 reference assemblies (Editor, Android, iOS defines) — not yet run in a real Editor |
+| `Assets/Scripts/*.cs`, `Platform/` | `ArQuestTrail` | Thin MonoBehaviours: feed Unity's inputs into Core, draw the results — the app's screens (`AppScreens`) and the play screen (`QuestHud`) | Compiled by Unity 6.0 LTS with no warnings, and played end to end in the Editor by `SampleTrailRun` (below). Android/iOS builds not yet made. |
+| `Assets/Editor/`, `Assets/Tests/PlayMode/` | Editor / `ArQuestTrail.PlayModeTests` | The sample scene builder, and the automated play-through | Run in Unity 6.0 LTS |
 | `Assets/Scripts/ARCore/` | `ArQuestTrail.ARCore` | VPS via ARCore Geospatial + geospatial anchors | API calls checked line by line against ARCore Extensions 1.56.0 source — not compiled |
 | `Assets/Scripts/ARFoundation/` | `ArQuestTrail.ARFoundation` | Environment-depth occlusion | API calls checked against AR Foundation 6.6.2 source — not compiled |
 
@@ -48,19 +48,20 @@ immediate-mode GUI (`UiKit` holds the shared look), so a bare scene runs the who
 The rules — first run, when to explain location, where a link goes, what Back does — are
 `Core/App/AppFlow.cs`, unit-tested; `AppScreens` only draws them.
 
-## 1. Create the project
+## 1. Open the project
 
-1. Unity Hub → New Project → **Unity 6 (6000.0 LTS or later)**, template **AR Mobile** (or 3D URP).
-2. Create it in this folder (`client-unity`), so Unity builds `Library/`, `ProjectSettings/` etc.
-   around the existing `Assets/` and `Packages/manifest-additions.json`. Everything Unity generates
-   is already in `.gitignore`.
-3. Merge `Packages/manifest-additions.json` into the generated `Packages/manifest.json`. At minimum
-   **`com.unity.nuget.newtonsoft-json`** — Core doesn't compile without it.
+Unity Hub → Add → *Add project from disk* → this folder, with Unity **6000.0.84f1** (or a newer
+6000.0 LTS patch). `Packages/manifest.json` already has what the Editor run needs (Newtonsoft,
+the test framework); `Library/` and the rest of what Unity generates is in `.gitignore`.
 
-## 2. Project settings
+For a phone build, add the AR packages from `Packages/manifest-additions.json` (AR Foundation,
+ARCore/ARKit, ARCore Extensions) and the Android or iOS Build Support module in Unity Hub.
 
-- **Player → Other Settings → Active Input Handling: Both.** The location service is the legacy
-  `Input.location`; AR templates often default to the new Input System only.
+## 2. Project settings (for a phone build)
+
+- **Active Input Handling** is *Input Manager (Old)*, which the location service
+  (`Input.location`) needs. If adding an AR template package switches it to the new Input
+  System only, set it to *Both*.
 - XR Plug-in Management: enable ARCore (Android) / ARKit (iOS).
 - Android: min API per ARCore's current requirement; iOS: 13+. LiDAR is **not** required (SR-VIS-02).
 - iOS: set *Location Usage Description* (Player → Other Settings) — required for `Input.location`.
@@ -83,6 +84,26 @@ The rules — first run, when to explain location, where a link goes, what Back 
   set up authorization (API key or keyless) per Google's Geospatial docs. Without it, `EarthState`
   reports an error and the app falls back to GPS, which is handled — just not sub-meter.
 
+## The sample scene
+
+`Assets/Scenes/SampleTrail.unity` is the default camera and light plus `QuestBootstrap` pointed
+at `http://127.0.0.1:3000` (**AR Quest Trail → Create Sample Scene** rebuilds it). With a server
+running and a trail seeded near the Editor walker's start, open it, press Play and use the app —
+or let a script do it:
+
+```bash
+# from the repo root, with the server on :3000
+(cd server && npm run seed:field-test -- --lat 13.0827 --lng 80.2707 --pins 3 --spacing 30 --dwell 5 --code SWAN42)
+# then, with the printed join code:
+QUEST_API_URL=http://127.0.0.1:3000 QUEST_JOIN_CODE=ABCD-EFGH \
+  "<Unity Editor>/Unity.exe" -projectPath client-unity -runTests -testPlatform PlayMode -testResults sample-run.xml
+```
+
+`Assets/Tests/PlayMode/SampleTrailRun.cs` plays it end to end in the Unity runtime: first-run
+screens, join by code, the walker walking to each pin, the code typed sloppily, the finish, back
+to My trails. Without `-batchmode` it saves a screenshot of every screen to `Logs/sample-run/`.
+It uses its own player data folder, so your Editor player is untouched.
+
 ## 3. Play it in the Editor first
 
 1. Bring the server up and seed a trail (from the repo root):
@@ -90,12 +111,13 @@ The rules — first run, when to explain location, where a link goes, what Back 
    JWT_SECRET=$(openssl rand -hex 32) docker compose up --build -d
    docker compose exec api node dist/jobs/seedFieldTestTrail.js --lat 13.0827 --lng 80.2707 --code SWAN42
    ```
-2. New scene → empty GameObject → add **`QuestBootstrap`**. Set *Api Base Url* to
-   `http://127.0.0.1:3000` (the Editor may use plain http; phones may not). Set the simulated start
-   a little west of the first pin's coordinates.
-3. Press Play and go through the app as a player: *Get started* → *Allow location* (the Editor
-   always has it) → *Join a trail* → the **join code** from the seed output → *Start trail*.
-   (Or set *Trail Id* from the seed output to skip straight to the play screen.)
+2. Open **`Assets/Scenes/SampleTrail.unity`**. Its `QuestBootstrap` points at
+   `http://127.0.0.1:3000` (the Editor may use plain http; phones may not), and the simulated
+   walker starts 32 m west of 13.0827, 80.2707 — so seed there, or move the start.
+   For a phone-shaped view, pick a portrait resolution in the Game view (e.g. 540×1080).
+3. Press Play and go through the app as a player: *Get started* (the Editor always has location,
+   so the location screen is skipped) → *Join a trail* → the **join code** from the seed output →
+   *Start trail*. (Or set *Trail Id* on `QuestBootstrap` to skip straight to the play screen.)
 4. On the play screen the HUD shows position source, connectivity, the active pin with distance
    and direction, and an **Editor walker**: tick *Walk to the active pin* and watch the dwell count
    up, the server confirm, and the next pin unlock. Try the code pin with a wrong code, then the

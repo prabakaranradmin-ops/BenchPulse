@@ -91,9 +91,13 @@ Ordered to match the build sequence in `../CLAUDE.md` — do them roughly top to
 
 ## Client status legend
 🟡 **CODE COMPLETE** = written; logic tested in `client-unity/dotnet` (unit + contract tests
-against the real server, in CI); Unity glue type-checked against Unity reference assemblies —
-**but not yet run in a Unity Editor or on a device.** It becomes ✅ after the Editor run and the
-ST-4.3 field test. See `client-unity/README.md` for exactly what was verified how.
+against the real server, in CI) — **but not yet run on a device.** It becomes ✅ after the ST-4.3
+field test. See `client-unity/README.md` for exactly what was verified how.
+**Editor run done (2026-10-08):** the Unity project is in the repo (Unity 6.0 LTS, 6000.0.84f1),
+compiles with no warnings, and `Assets/Tests/PlayMode/SampleTrailRun.cs` plays the app end to end
+in the Editor against the real server — first run, join by code, the simulated walker through
+three pins (dwell, dwell, code), finish, My trails. The AR assemblies (VPS, depth occlusion) are
+not compiled yet: their packages go in with the phone build.
 
 ## EPIC 3 — Unity Client: AR Positioning Foundation
 

@@ -84,7 +84,8 @@ namespace ArQuestTrail
             (Rect screen, Rect safe) = UiKit.BeginScaled();
             GUI.Box(screen, GUIContent.none, ui.Page);
 
-            GUILayout.BeginArea(new Rect(safe.x + 20, safe.y + 20, safe.width - 40, safe.height - 40));
+            float columnWidth = Mathf.Min(safe.width, UiKit.VirtualWidth) - 40;
+            GUILayout.BeginArea(new Rect(safe.x + (safe.width - columnWidth) / 2, safe.y + 20, columnWidth, safe.height - 40));
             _scroll = GUILayout.BeginScrollView(_scroll, GUIStyle.none, GUIStyle.none);
 
             switch (Flow.Screen)

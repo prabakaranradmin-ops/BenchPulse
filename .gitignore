@@ -67,7 +67,10 @@ client-unity/ExportedObj/
 client-unity/.vs/
 client-unity/*.csproj
 client-unity/*.sln
+client-unity/*.slnx
 client-unity/*.user
+# The test runner's temporary scene, left behind if Unity exits mid-run.
+client-unity/Assets/InitTestScene*.unity*
 client-unity/*.unitypackage
 client-unity/crashlytics-build.properties
 client-unity/sysinfo.txt

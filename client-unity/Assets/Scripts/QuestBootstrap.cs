@@ -24,6 +24,10 @@ namespace ArQuestTrail
                  "skipping the join screens. Leave empty to use join codes like a player.")]
         [SerializeField] private string trailId = "";
 
+        [Tooltip("Folder under Application.persistentDataPath that holds this player's device key and data. " +
+                 "A different folder is a different player — the automated sample run uses its own.")]
+        [SerializeField] private string storageFolder = "arquest";
+
         [Header("Editor")]
         [Tooltip("The Editor has no GPS. A simulated walker stands in for the player.")]
         [SerializeField] private bool simulateLocationInEditor = true;
@@ -64,7 +68,7 @@ namespace ArQuestTrail
             QuestHud hud = GetOrAdd<QuestHud>();
             AppScreens screens = GetOrAdd<AppScreens>();
 
-            string root = Path.Combine(Application.persistentDataPath, "arquest");
+            string root = Path.Combine(Application.persistentDataPath, storageFolder);
             var data = new FileKeyValueStore(Path.Combine(root, "data"));
             // The device key lives in the app sandbox for the field test. Before launch it belongs
             // in iOS Keychain / Android Keystore — see client-unity/README.md.

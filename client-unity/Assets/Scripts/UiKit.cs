@@ -12,6 +12,12 @@ namespace ArQuestTrail
         /// <summary>Screens lay out in a column this wide, scaled to the device.</summary>
         public const float VirtualWidth = 420f;
 
+        /// <summary>
+        /// Scaling also keeps at least this much height, so a landscape screen (the Editor's Game
+        /// view, a tablet on its side) gets a centred column instead of a few giant lines.
+        /// </summary>
+        public const float VirtualMinHeight = 720f;
+
         public static readonly Color Background = new Color32(0x0b, 0x11, 0x20, 0xff);
         public static readonly Color Surface = new Color32(0x11, 0x18, 0x27, 0xff);
         public static readonly Color SurfaceHover = new Color32(0x1f, 0x29, 0x37, 0xff);
@@ -95,7 +101,9 @@ namespace ArQuestTrail
         /// </summary>
         public static (Rect Screen, Rect Safe) BeginScaled()
         {
-            float scale = Mathf.Max(1f, UnityEngine.Screen.width / VirtualWidth);
+            float scale = Mathf.Max(
+                1f,
+                Mathf.Min(UnityEngine.Screen.width / VirtualWidth, UnityEngine.Screen.height / VirtualMinHeight));
             GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
             Rect safe = UnityEngine.Screen.safeArea;
             // safeArea's origin is the bottom-left corner; GUI's is the top-left.
