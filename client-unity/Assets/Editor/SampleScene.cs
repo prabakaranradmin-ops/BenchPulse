@@ -30,6 +30,16 @@ namespace ArQuestTrail.EditorTools
         /// </summary>
         public static void CreateInBatch() => Create(Argument("-apiBaseUrl") ?? DefaultApiBaseUrl);
 
+        /// <summary>
+        /// Opens the Editor straight into the running app:
+        /// <c>Unity -projectPath client-unity -executeMethod ArQuestTrail.EditorTools.SampleScene.OpenAndPlay</c>
+        /// </summary>
+        public static void OpenAndPlay()
+        {
+            EditorSceneManager.OpenScene(ScenePath);
+            EditorApplication.EnterPlaymode();
+        }
+
         public static void Create(string apiBaseUrl)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(ScenePath));

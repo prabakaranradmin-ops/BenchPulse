@@ -88,8 +88,10 @@ ARCore/ARKit, ARCore Extensions) and the Android or iOS Build Support module in 
 
 `Assets/Scenes/SampleTrail.unity` is the default camera and light plus `QuestBootstrap` pointed
 at `http://127.0.0.1:3000` (**AR Quest Trail → Create Sample Scene** rebuilds it). With a server
-running and a trail seeded near the Editor walker's start, open it, press Play and use the app —
-or let a script do it:
+running and a trail seeded near the Editor walker's start, open it, press Play and use the app.
+To open the Editor straight into the running app:
+`Unity.exe -projectPath client-unity -executeMethod ArQuestTrail.EditorTools.SampleScene.OpenAndPlay`.
+Or let a script play it:
 
 ```bash
 # from the repo root, with the server on :3000
