@@ -118,8 +118,10 @@ jobs:
 
       - name: Start the server
         working-directory: server
+        # LANDCOVER_CHECKS=off: publishing a trail would otherwise query the public Overpass
+        # servers from CI — slow, rate-limited, and not what these tests are about.
         run: |
-          JWT_SECRET="ci-$(openssl rand -hex 16)" PORT=3000 nohup node dist/index.js > server.log 2>&1 &
+          JWT_SECRET="ci-$(openssl rand -hex 16)" LANDCOVER_CHECKS=off PORT=3000 nohup node dist/index.js > server.log 2>&1 &
           curl --silent --fail --retry 30 --retry-delay 1 --retry-connrefused http://127.0.0.1:3000/health
 
       - name: Promote a throwaway admin for the contract tests
@@ -140,3 +142,50 @@ jobs:
       - name: Server log, if anything failed
         if: failure()
         run: cat server/server.log || true
+
+  admin-web:
+    name: Admin web (lint, typecheck, test, build)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: admin-web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: admin-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Test
+        run: npm test
+
+      - name: Typecheck and build
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  image:
+    name: Docker image (server + admin web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker build --file server/Dockerfile --tag ar-quest-trail-server:ci .
+
+      - name: Admin web is in the image
+        run: docker run --rm --entrypoint sh ar-quest-trail-server:ci -c 'test -f "$ADMIN_WEB_DIR/index.html"'

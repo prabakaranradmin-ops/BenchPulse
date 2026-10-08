@@ -112,6 +112,15 @@ export function validateTrailDraft(pins: DraftPin[]): TrailValidationResult {
         sequenceIndex: pin.sequenceIndex,
       });
     }
+    // ST-6.1 is deferred (docs/decisions.md #4) and completion refuses photo pins, so one in a
+    // published trail is a pin nobody can ever get past.
+    if (pin.challengeType === 'photo_confirmation') {
+      errors.push({
+        code: 'challenge_type_unavailable',
+        message: `Pin ${pin.sequenceIndex} is a photo challenge, which players can't complete yet.`,
+        sequenceIndex: pin.sequenceIndex,
+      });
+    }
     if (pin.challengeType === 'code_entry' && !pin.challengeConfig?.code) {
       warnings.push({
         code: 'code_entry_missing_code',
@@ -158,9 +167,8 @@ export function validateTrailDraft(pins: DraftPin[]): TrailValidationResult {
     });
   }
 
-  // Not implemented: SR-ADMIN-01's "in water" and "inside a building footprint" warnings. Both
-  // need a landcover/footprint data source (OSM extract, vector tiles) that this service has no
-  // access to — they'd slot in here as further `warnings.push(...)` once one is chosen.
+  // SR-ADMIN-01's "in water" / "inside a building" warnings need network lookups, so they live
+  // in landcover.ts and are added by the route rather than in this pure function.
 
   return { errors, warnings };
 }

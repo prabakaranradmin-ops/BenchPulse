@@ -30,17 +30,27 @@ npm run migrate:create -- add-something   # scaffold the next migration file
 
 npm run job:purge-location-history   # SR-PRIV-01 retention purge (see below)
 npm run grant-admin -- <userId>      # promote a player to Admin (EPIC 7); add `player` to demote
+npm run admin:new-key                # mint a new Admin and print its key once (for /admin/)
 npm run seed:field-test -- --lat <lat> --lng <lng>   # author a walkable trail (see below)
 ```
 
+The admin web tool (`../admin-web/`) is served at `/admin/` once it has been built
+(`npm install && npm run build` in `admin-web/`); until then `/admin/` says so. The Docker image
+builds it for you.
+
 ## Running in a container
 
-`docker-compose.yml` at the repo root brings up Postgres+PostGIS, applies migrations, and starts
-the API:
+`docker-compose.yml` at the repo root brings up Postgres+PostGIS, applies migrations, starts
+the API with the admin web tool at `/admin/`, and runs the daily retention purge:
 
 ```bash
 JWT_SECRET=$(openssl rand -hex 32) docker compose up --build
+docker compose exec api node dist/jobs/grantAdmin.js --new-key   # key for /admin/ sign-in
 ```
+
+The image is built from the repo root (`docker build -f server/Dockerfile .`) because it
+includes `admin-web/`. Set `CESIUM_ION_TOKEN` in the environment for 3D terrain and buildings on
+the admin map.
 
 Then point a tunnel (Cloudflare Tunnel, ngrok, …) at `localhost:3000`. **TLS lives in the tunnel
 or the host, not in this process** — iOS ATS and Android both refuse cleartext, so the phone has
@@ -89,6 +99,12 @@ it — promotion is the `grant-admin` CLI above, so a stolen player token can ne
 authoring rights. The role is re-read from the database on every admin request rather than baked
 into the token, so revoking it takes effect immediately instead of waiting out a 30-day session.
 
+The admin web tool signs in the same way a player does — it exchanges the Admin's key at
+`POST /api/v1/players/token` and keeps only the resulting session token (in the tab, or in the
+browser if "keep me signed in" is ticked), never the key. `npm run admin:new-key` creates an
+Admin and prints a fresh key for this. The tool's page is served with a CSP that allows
+same-origin script only.
+
 ### Schema changes (ST-1.3)
 
 `migrations/` is the single source of truth for the schema — there is no `schema.sql` to load by
@@ -111,17 +127,25 @@ comes only from the verified token — no route accepts a user id from a body, q
 | `POST /api/v1/attempts/:attemptId/pins/:pinId/complete` | GDR-01, GDR-04, SR-GEO-04, SR-SEC-02, ST-2.3 | See below.                                                                                                                                                                                                                                                   |
 | `POST /api/v1/pins/:pinId/report`                       | GDR-09, ST-2.4                               | Body `{ note? }`. Queues a "can't find this pin" report for the Admin dashboard. No dedup in v1.                                                                                                                                                             |
 | `DELETE /api/v1/players/me`                             | SR-PRIV-02, ST-8.2                           | Deletes the caller's location history, progress, attempts, and player row. Pin reports survive with a null reporter — they're an Admin work item about a place, not personal data.                                                                           |
+| `GET /api/v1/join/:code`                                | ST-2.10, SR-DATA-02                          | Turns a join code (any case, with or without the dash) into `{ trailId, name, joinCode, pinCount, expiryDays }`. 400 `invalid_join_code` for a malformed code, 404 `join_code_not_found` for an unknown or unpublished one. 20 requests/min per IP.          |
+| `GET /join/:code` (no `/api/v1`, no auth)               | ST-2.10                                      | The page a QR code or shared link opens: shows the code and an "Open in the app" link (`arquest://join/CODE`). Identical whether or not the code exists, so it can't be used to test codes. 20 requests/min per IP.                                          |
 
 ### Authoring API — Admin only (EPIC 7)
 
-| Route                                         | Requirements                   | Notes                                                                                                                                                              |
-| --------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `POST /api/v1/admin/trails`                   | ST-7.2                         | Body `{ name, expiryDays? }` → an unpublished trail shell.                                                                                                         |
-| `POST /api/v1/admin/trails/:trailId/versions` | ST-7.2, GDR-07, SR-ADMIN-01/02 | Body `{ pins: [...] }`. Writes a new version, its pins, and moves `current_version_id` — in one transaction. Anyone mid-attempt keeps the version they started on. |
-| `GET /api/v1/admin/pin-reports`               | ST-7.3, GDR-09                 | `?status=open                                                                                                                                                      | reviewed | resolved`, `?limit=` (default 50). Newest first, and never includes who filed a report. |
-| `PATCH /api/v1/admin/pin-reports/:reportId`   | ST-7.3                         | Body `{ status }` — move a report through triage.                                                                                                                  |
-| `GET /api/v1/admin/analytics/trails`          | ST-8.3, SR-PRIV-03             | Aggregates per trail, busiest first. `?from=`/`?to=` ISO bounds, `?limit=` (default 50).                                                                           |
-| `GET /api/v1/admin/analytics/trails/:trailId` | ST-8.3, SR-PRIV-03             | One trail's aggregates plus a per-pin drop-off funnel.                                                                                                             |
+| Route                                          | Requirements                   | Notes                                                                                                                                                                                     |
+| ---------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/admin/trails`                     | ST-7.5                         | Every trail, newest first, with its join code, current version number, pin count and open report count.                                                                                   |
+| `POST /api/v1/admin/trails`                    | ST-7.2                         | Body `{ name, expiryDays? }` → an unpublished trail shell, with its join code.                                                                                                            |
+| `GET /api/v1/admin/trails/:trailId`            | ST-7.5                         | The trail, its version history (`isCurrent` on the live one) and the current version's pins with their full challenge settings, codes included.                                           |
+| `PATCH /api/v1/admin/trails/:trailId`          | ST-7.5, GDR-08                 | Body `{ name?, expiryDays? }` (`expiryDays: null` removes the time limit). Expiry is judged against the trail's current setting, so a change applies to attempts already in progress too. |
+| `POST /api/v1/admin/trails/:trailId/join-code` | ST-2.10                        | Issues a new join code; the old one, and every link and QR code using it, stops working.                                                                                                  |
+| `POST /api/v1/admin/trails/validate`           | ST-7.2, SR-ADMIN-01/02         | Body `{ pins: [...] }` (may be empty) → `{ errors, warnings }` without publishing — what the editor calls as the Admin works.                                                             |
+| `POST /api/v1/admin/trails/:trailId/versions`  | ST-7.2, GDR-07, SR-ADMIN-01/02 | Body `{ pins: [...] }`. Writes a new version, its pins, and moves `current_version_id` — in one transaction. Anyone mid-attempt keeps the version they started on.                        |
+| `GET /api/v1/admin/pin-reports`                | ST-7.3, GDR-09                 | `?status=open\|reviewed\|resolved`, `?limit=` (default 50). Newest first, with the pin's trail, position and version; never includes who filed a report.                                  |
+| `PATCH /api/v1/admin/pin-reports/:reportId`    | ST-7.3                         | Body `{ status }` — move a report through triage.                                                                                                                                         |
+| `GET /api/v1/admin/config`                     | ST-7.1                         | `{ cesiumIonToken }` for the admin map (null without `CESIUM_ION_TOKEN`). Admin-only because the token is billed per use.                                                                 |
+| `GET /api/v1/admin/analytics/trails`           | ST-8.3, SR-PRIV-03             | Aggregates per trail, busiest first. `?from=`/`?to=` ISO bounds, `?limit=` (default 50).                                                                                                  |
+| `GET /api/v1/admin/analytics/trails/:trailId`  | ST-8.3, SR-PRIV-03             | One trail's aggregates plus a per-pin drop-off funnel.                                                                                                                                    |
 
 ### Analytics (ST-8.3)
 
@@ -148,17 +172,24 @@ otherwise every later pin looks like a cliff. The funnel groups by `sequence_ind
 trail's versions, since drop-off is a property of the trail and pins change identity when the
 Admin republishes (GDR-07).
 
+### Publish checks (SR-ADMIN-01/02)
+
 Publishing distinguishes two kinds of problem. **Errors block** (422) and cover only what would
 make a trail unplayable or violate the schema: a sequence with gaps or duplicates, impossible
-coordinates, a non-positive radius, an unknown challenge type. **Warnings never block** — the
+coordinates, a non-positive radius, an unknown challenge type, and a `photo_confirmation` pin
+while ST-6.1 is deferred (no player could ever complete it). **Warnings never block** — the
 version publishes and the warnings come back in the response for the Admin tool to show, because
-SR-ADMIN-01 makes Admin judgment the control. Implemented warnings are pin spacing below 2× the
-smaller radius (a pin that completes itself on unlock), more than 25 pins, a route longer than
-20km, and a `code_entry` pin with no code set.
+SR-ADMIN-01 makes Admin judgment the control. The warnings are pin spacing below 2× the smaller
+radius (a pin that completes itself on unlock), more than 25 pins, a route longer than 20km, a
+`code_entry` pin with no code set, and the two below.
 
-SR-ADMIN-01's "in water" and "inside a building footprint" warnings are **not implemented** —
-both need a landcover/footprint data source this service doesn't have. `trailValidation.ts` marks
-where they slot in.
+**In water / inside a building** (`src/services/landcover.ts`) come from OpenStreetMap via the
+Overpass API: named water and building areas containing the pin, plus outlines within ~60m
+tested with a local point-in-polygon check (Overpass's own `is_in` only covers named areas). The
+public Overpass servers are often busy, so the checker fails over between several, shares one
+8-second deadline across them, and caches answers per coordinate for a day. If none answers,
+the publish still succeeds with a `landcover_check_unavailable` warning. `LANDCOVER_CHECKS=off`
+turns the lookups off; `OVERPASS_URLS` points them at other servers (your own, for volume).
 
 ### Player identity `[ASSUMED — confirm or override]`
 
@@ -248,9 +279,13 @@ migrate`.
   attempt → both pins → replay → cross-player rejection → pin report).
 - `src/routes/players.ts` — token exchange (ST-2.6), so a player has a real `users` row for
   `trail_attempts.user_id` to point at.
-- `src/routes/admin.ts` + `src/services/trailValidation.ts` — **implemented and tested**: the
-  authoring/publish API and report queue behind EPIC 7's desktop tool (ST-7.2, ST-7.3). The 3D
-  map UI itself (ST-7.1) is a separate client and isn't built.
+- `src/routes/admin.ts` + `src/services/trailValidation.ts` + `src/services/landcover.ts` —
+  **implemented and tested**: the authoring/publish API, trail management and report queue
+  behind EPIC 7 (ST-7.2, ST-7.3, ST-7.5).
+- `src/routes/join.ts` — **implemented and tested**: join codes (ST-2.10).
+- `src/routes/adminWeb.ts` — **implemented and tested**: serves the admin web tool
+  (`../admin-web/`, ST-7.1) at `/admin/` with its CSP and caching, exempt from the API rate
+  limit, plus `GET /api/v1/admin/config`.
 
 ## Integration test (ST-2.7)
 
@@ -273,8 +308,9 @@ migration idempotency (ST-1.3), the SR-PRIV-02 deletion cascades, and the SR-PRI
 retention window — 90 days by default `[ASSUMED — confirm]`, overridable with
 `LOCATION_HISTORY_RETENTION_DAYS`. It prints one JSON line and exits non-zero on failure, so
 cron or a Kubernetes CronJob can alert on it; in a built image the entry point is
-`node dist/jobs/purgeLocationHistory.js`. **Nothing schedules it yet** — wiring it into the
-deployment's scheduler is a deploy-time task, not a code one.
+`node dist/jobs/purgeLocationHistory.js`. Under `docker compose` the `purge` service runs it at
+start and then every 24 hours (`docker compose logs purge`); another host needs its own
+scheduler pointed at the same entry point.
 
 The spec also allows reducing old rows to trail-level facts instead of deleting them. Deleting
 is enough: `trail_attempts` and `pin_progress` hold completion facts with no coordinates, so

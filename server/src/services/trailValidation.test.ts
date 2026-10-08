@@ -62,6 +62,16 @@ describe('validateTrailDraft — errors that block a publish', () => {
       'invalid_challenge_type',
     ]);
   });
+
+  it('rejects a photo pin while ST-6.1 is deferred, since no player could complete it', () => {
+    const result = validateTrailDraft([
+      pin(1, 0),
+      pin(2, 300, { challengeType: 'photo_confirmation', challengeConfig: { prompt: 'The arch' } }),
+    ]);
+
+    expect(codes(result.errors)).toEqual(['challenge_type_unavailable']);
+    expect(result.errors[0].sequenceIndex).toBe(2);
+  });
 });
 
 describe('validateTrailDraft — advisory warnings (SR-ADMIN-01/02)', () => {

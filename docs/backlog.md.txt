@@ -75,6 +75,20 @@ Ordered to match the build sequence in `../CLAUDE.md` — do them roughly top to
   attempt existed. A *plausible* past time is still accepted by design — that's what a truthful
   offline capture looks like; distinguishing forgery needs attestation, which §6.4 defers.
 
+- **ST-2.10 — Join codes** ✅ DONE (NEW — decision 2026-10-07 #1: players find a trail by link,
+  QR or code; there is no listing or nearby search, per SR-DATA-02)
+  Migration `1791397841662_trail-join-codes.sql` (every trail gets an 8-character code from an
+  unambiguous alphabet, shown `ABCD-EFGH`; existing trails backfilled). `GET /api/v1/join/:code`
+  resolves a code for a signed-in player; `GET /join/:code` is the public page a QR code or
+  shared link opens, which hands off to the app (`arquest://join/CODE`) and shows only the code
+  — the same page whether or not the code exists. Both are rate-limited per IP (20/min), since
+  fresh device keys mint fresh players for free. Admins can issue a new code, which kills the
+  old one and every link and poster using it.
+- **ST-2.11 — Strict request validation** ✅ DONE (NEW — found while testing ST-2.10)
+  Fastify's defaults stripped unknown fields (making every `additionalProperties: false` a
+  no-op) and coerced types — `accuracyM: null` became 0, i.e. *perfect* accuracy, in the history
+  SR-SEC-02 judges movement from. Bodies are now validated as sent; anything else is a 400.
+
 ## Client status legend
 🟡 **CODE COMPLETE** = written; logic tested in `client-unity/dotnet` (unit + contract tests
 against the real server, in CI); Unity glue type-checked against Unity reference assemblies —
@@ -139,7 +153,9 @@ only after the field test, as planned. Visual QA per device tier is manual by de
   content becomes visible to anyone but its owner"). **Changed by ST-6.2:** a
   `photo_confirmation` pin is now *refused* at completion with
   `challenge_type_not_implemented` instead of silently completing on position alone —
-  unverified progress was the worse failure.
+  unverified progress was the worse failure. **Deferred** (decision 2026-10-07 #4), so publishing
+  a photo pin is now a blocking error (`challenge_type_unavailable`) — such a trail could never
+  be finished — and the admin tool shows the option as "not available yet".
 - **ST-6.2 — `code_entry`** (GDR-02) ✅ DONE
   `server/src/services/challengeVerification.ts`, wired into the completion route. The code is
   checked server-side only; `pinDto` never ships it to the device.
@@ -153,27 +169,53 @@ only after the field test, as planned. Visual QA per device tier is manual by de
   next pin stays locked until the server checks it (`ChallengeTypes.CanVerifyOnDevice`) — the
   device never holds the answer, so it can't let a player walk on past a wrong code.
 
-## EPIC 7 — Desktop Admin Authoring Tool
-*(Backend pulled forward: until this existed, a trail could only be created with raw SQL, which
-blocked authoring the trail for the ST-4.3 field test. The 3D map UI is still unbuilt.)*
-- **ST-7.1 — Map-based pin placement UI** — not started. The desktop client for the API below;
-  original CRS's "3D desktop map interface".
-- **ST-7.2 — Publish flow** ✅ DONE (backend)
+## EPIC 7 — Admin Authoring Tool
+*(Decision 2026-10-07 #3: a CesiumJS **web** app first, served by the API server at `/admin/`;
+a Unity desktop tool later, if still wanted. Backend was pulled forward earlier because without
+it a trail could only be created with raw SQL.)*
+- **ST-7.1 — Map-based pin placement UI** ✅ DONE (web — `admin-web/`)
+  React + CesiumJS. Place pins in order by clicking the map; move (click the new spot), reorder,
+  delete;
+  per-pin challenge (dwell seconds, or a code that never leaves the server), radius drawn on the
+  map, hint; place search (OpenStreetMap Nominatim) or lat/lng. SR-ADMIN-01/02 checks run as the
+  Admin edits (debounced; problems marked on the map and in the list) and again at publish,
+  which confirms with the warnings listed. Unpublished edits survive navigation and reloads in
+  the same tab. Also: trail list, rename and GDR-08 time limit, join code with copy/link/QR
+  download/rotate, version history.
+  Map: decision 2026-10-07 #8 — with `CESIUM_ION_TOKEN`, Cesium World Terrain + OSM Buildings;
+  without, a flat OpenStreetMap globe and no Cesium ion dependency at all.
+  **Verified:** walked end to end in headless Chromium against the Docker image (sign in → create
+  → place → code pin → reorder → reload → publish → QR → a player joins and reports a pin →
+  "Show on map" → resolve → analytics), with screenshots reviewed and no browser errors.
+  **Not yet exercised:** the 3D terrain/buildings mode, which needs a real ion token.
+- **ST-7.2 — Publish flow** ✅ DONE
   `POST /api/v1/admin/trails` and `POST /api/v1/admin/trails/:trailId/versions` in
   `server/src/routes/admin.ts`. Publishing is transactional and additive (GDR-07): existing
   versions and in-flight attempts are never touched, only `current_version_id` moves.
   Advisory warnings (SR-ADMIN-01/02) in `server/src/services/trailValidation.ts`: pin spacing
   below 2× the smaller radius, >25 pins, >20km route, `code_entry` with no code. Structural
-  errors (sequence gaps/duplicates, bad coordinates/radius/challenge type) block with a 422.
-  **Not implemented:** SR-ADMIN-01's water / building-footprint warnings — both need a
-  landcover or footprint data source that has to be chosen first.
-- **ST-7.3 — Pin report review queue** ✅ DONE (backend)
+  errors (sequence gaps/duplicates, bad coordinates/radius/challenge type, photo pins while
+  ST-6.1 is deferred) block with a 422. `POST /api/v1/admin/trails/validate` runs the same
+  checks on a draft without publishing — what the editor calls as the Admin works.
+  **SR-ADMIN-01 water / inside-a-building warnings** (decision 2026-10-07 #9):
+  `server/src/services/landcover.ts` asks OpenStreetMap's Overpass API at check time, with
+  failover across public servers, a shared deadline and a per-coordinate cache. If no server
+  answers, the publish still goes through with a `landcover_check_unavailable` warning — the
+  checks are advisory, and Admin judgment is the control. `LANDCOVER_CHECKS=off` disables them.
+- **ST-7.3 — Pin report review queue** ✅ DONE
   `GET /api/v1/admin/pin-reports` (status filter, newest first) and
-  `PATCH /api/v1/admin/pin-reports/:reportId`. The list never exposes who filed a report.
+  `PATCH /api/v1/admin/pin-reports/:reportId`. The list never exposes who filed a report; each
+  row carries its trail, pin position and version so the tool can open the pin on the map, and
+  flags reports against a version that has since been replaced. UI: the Reports screen.
 - **ST-7.4 — Admin role** (NEW — needed by the above)
   `users.role` (migration `1788837479386_admin-role.sql`) plus a `requireAdmin` hook that
   re-reads the role per request, so revocation is immediate. Promotion is the out-of-band
   `npm run grant-admin` CLI — there is deliberately no endpoint that grants authoring rights.
+  `npm run admin:new-key` mints a fresh Admin key and prints it once, for signing in to the tool.
+- **ST-7.5 — Trail management API** ✅ DONE (NEW — what the web tool needed beyond ST-7.2)
+  List trails (version, pin count, open reports), trail detail with version history, rename /
+  set the GDR-08 time limit, issue a new join code, and `GET /api/v1/admin/config` (the map's
+  ion token — Admin-only, since it is billed per use).
 
 ## EPIC 8 — Privacy & Data Lifecycle
 *(Pulled forward ahead of EPICs 3–7: both are v1-scope, server-side, and testable now, while the
@@ -183,7 +225,8 @@ client epics need the Unity Editor and a real device.)*
   `server/src/jobs/purgeLocationHistory.ts`, run with `npm run job:purge-location-history`.
   90-day default `[ASSUMED — confirm]`, `LOCATION_HISTORY_RETENTION_DAYS` overrides it, and a
   window below one day throws rather than purging everything.
-  **Still open:** nothing *schedules* it — that's a deploy-time task (cron / CronJob).
+  **Scheduled** (decision 2026-10-07 #7): the `purge` service in `docker-compose.yml` runs it at
+  start and then daily, one JSON log line per run.
 - **ST-8.2 — "Delete my data" action** (SR-PRIV-02) ✅ DONE
   `DELETE /api/v1/players/me`. Deletes location history, progress, attempts, and the player row;
   pin reports survive with a null reporter. A stale token whose player is gone gets a clean 401.
@@ -197,7 +240,9 @@ client epics need the Unity Editor and a real device.)*
   **Product decision to confirm:** cohorts below 5 attempts have rates and timings suppressed
   (`suppressed: true`, counts still reported) `[ASSUMED — confirm or override]`, since a rate
   over one attempt is one identifiable player's outcome.
-  Requirements §8 keeps dashboarding out of v1 — this is the raw-aggregate API only.
+  Requirements §8 keeps dashboarding out of v1 — the admin tool's Analytics screen is a plain
+  read-out of these aggregates (per-trail table, stats and drop-off funnel, 7/30/90-day or all
+  time), not a dashboard.
 
 ## EPIC 9 — Offline Resilience
 - **ST-9.1 — Offline completion queue** (SR-NET-02) 🟡 CODE COMPLETE

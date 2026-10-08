@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { fileURLToPath } from 'node:url';
 import { buildApp } from './app.js';
 import { createPostgresStore } from './db/postgresStore.js';
 import { createOverpassChecker } from './services/landcover.js';
@@ -32,10 +33,19 @@ const landcover =
           .filter(Boolean),
       });
 
+// ST-7.1: the admin web tool. ADMIN_WEB_DIR overrides where its build lives (the Docker image
+// sets it); CESIUM_ION_TOKEN switches its map from flat OpenStreetMap to 3D terrain + buildings.
+const adminWebDir =
+  process.env.ADMIN_WEB_DIR ?? fileURLToPath(new URL('../../admin-web/dist/', import.meta.url));
+
 const app = await buildApp({
   store: createPostgresStore(databaseUrl),
   jwtSecret,
   landcover,
+  adminWeb: {
+    root: adminWebDir,
+    cesiumIonToken: process.env.CESIUM_ION_TOKEN?.trim() || null,
+  },
   logger: true,
 });
 

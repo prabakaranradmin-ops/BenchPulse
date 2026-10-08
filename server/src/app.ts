@@ -11,6 +11,7 @@ import { pinRoutes } from './routes/pins.js';
 import { playerRoutes } from './routes/players.js';
 import { adminRoutes } from './routes/admin.js';
 import { joinRoutes } from './routes/join.js';
+import { adminWebRoutes, type AdminWebOptions } from './routes/adminWeb.js';
 import { noLandcoverChecks, type LandcoverChecker } from './services/landcover.js';
 
 declare module 'fastify' {
@@ -25,6 +26,8 @@ export interface BuildAppOptions {
   jwtSecret: string;
   /** SR-ADMIN-01 water/building lookups. Off unless given — index.ts wires the live Overpass one. */
   landcover?: LandcoverChecker;
+  /** The admin web tool at /admin/ and its map settings. Without a root, /admin/ explains. */
+  adminWeb?: AdminWebOptions;
   logger?: FastifyServerOptions['logger'];
   /** SR-SEC-03: basic per-user rate limit on the pin/progress API. `false` disables it. */
   rateLimit?: { max: number; timeWindow: string | number } | false;
@@ -69,6 +72,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(playerRoutes);
   await app.register(joinRoutes);
   await app.register(adminRoutes);
+  await app.register(adminWebRoutes, options.adminWeb ?? {});
   await app.register(trailRoutes);
   await app.register(attemptRoutes);
   await app.register(pinRoutes);

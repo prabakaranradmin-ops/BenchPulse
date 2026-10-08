@@ -6,6 +6,8 @@ build/
 coverage/
 .nyc_output/
 .vitest-cache/
+# Copied from node_modules by admin-web/scripts/copy-cesium.mjs on every dev/build.
+admin-web/public/cesium/
 
 # --- .NET (client-unity/dotnet: the Core library built and tested outside Unity) ---
 bin/
