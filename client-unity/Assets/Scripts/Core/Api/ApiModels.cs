@@ -67,6 +67,21 @@ namespace ArQuestTrail.Core
         public int? CodeLength { get; set; }
     }
 
+    /// <summary>GET /api/v1/join/:code (ST-2.10): the trail a join code points at.</summary>
+    public sealed class JoinedTrailDto
+    {
+        public string TrailId { get; set; }
+        public string Name { get; set; }
+
+        /// <summary>Formatted, e.g. "ABCD-EFGH".</summary>
+        public string JoinCode { get; set; }
+
+        public int PinCount { get; set; }
+
+        /// <summary>GDR-08: null means no time limit.</summary>
+        public int? ExpiryDays { get; set; }
+    }
+
     public sealed class StartAttemptRequest
     {
         public string TrailId { get; set; }

@@ -12,6 +12,7 @@ import 'dotenv/config';
 import { randomBytes } from 'node:crypto';
 import { createPostgresStore } from '../db/postgresStore.js';
 import { hashDeviceKey } from '../services/deviceKey.js';
+import { formatJoinCode } from '../services/joinCode.js';
 import { offsetPointEast } from '../services/geo.js';
 import { validateTrailDraft, type DraftPin } from '../services/trailValidation.js';
 import type { NewPinInput } from '../db/types.js';
@@ -130,6 +131,9 @@ try {
 
   console.log(`\nSeeded "${trail.name}" (version ${published.version.versionNumber})\n`);
   console.log(`  trailId       ${trail.id}`);
+  console.log(
+    `  joinCode      ${formatJoinCode(trail.joinCode)}   (what a player types in the app)`,
+  );
   console.log(`  playerDeviceKey  ${options.playerKey}`);
   console.log(`  adminDeviceKey   ${options.adminKey}`);
   console.log(`  playerId      ${player.id}\n`);

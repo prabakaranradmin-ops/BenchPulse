@@ -78,6 +78,13 @@ namespace ArQuestTrail.Core
             PlayerId = null;
         }
 
+        /// <summary>
+        /// ST-2.10: what a join code points at. 400 <c>invalid_join_code</c> for a malformed code,
+        /// 404 <c>join_code_not_found</c> for an unknown or unpublished one.
+        /// </summary>
+        public Task<ApiResult<JoinedTrailDto>> ResolveJoinCodeAsync(string code, CancellationToken cancellationToken = default) =>
+            SendAsync<JoinedTrailDto>("GET", $"/api/v1/join/{Escape(code)}", null, cancellationToken);
+
         public Task<ApiResult<TrailDto>> GetTrailAsync(string trailId, CancellationToken cancellationToken = default) =>
             SendAsync<TrailDto>("GET", $"/api/v1/trails/{Escape(trailId)}", null, cancellationToken);
 

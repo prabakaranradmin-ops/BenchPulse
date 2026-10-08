@@ -24,6 +24,9 @@ namespace ArQuestTrail
         private float _nextFlushAt;
         private NetworkReachability _lastReachability;
 
+        /// <summary>Pins exist in the scene only while the player is on the play screen.</summary>
+        private bool _playing;
+
         public QuestSession Session { get; private set; }
 
         public string TrailId { get; private set; }
@@ -43,10 +46,9 @@ namespace ArQuestTrail
 
         public event Action<PinDto, ApiError> OnCompletionRejected;
 
-        public void Initialize(QuestSession session, string trailId)
+        public void Initialize(QuestSession session)
         {
             Session = session;
-            TrailId = trailId;
             _lastReachability = Application.internetReachability;
 
             session.ProgressChanged += SyncPins;
@@ -67,19 +69,29 @@ namespace ArQuestTrail
             session.TrailCompleted += attempt => CompletedAttempt = attempt;
             session.PlayerDataDeleted += () =>
             {
-                ClearPins();
+                Leave();
+                TrailId = null;
                 CompletedAttempt = null;
-                Status = "Your data has been deleted. Restart the app to play as a new player.";
             };
         }
 
-        public async Task BeginAsync()
+        /// <summary>Opens a trail on the play screen: loads it and starts or resumes the attempt.</summary>
+        public async Task BeginAsync(string trailId)
         {
-            if (string.IsNullOrWhiteSpace(TrailId))
+            if (string.IsNullOrWhiteSpace(trailId))
             {
-                Status = "No trail id set on QuestBootstrap — run `npm run seed:field-test` and paste one in.";
-                return;
+                throw new ArgumentException("A trail id is required.", nameof(trailId));
             }
+
+            if (trailId != TrailId)
+            {
+                ClearPins();
+            }
+
+            TrailId = trailId;
+            _playing = true;
+            LastMessage = null;
+            CompletedAttempt = null;
 
             await Run(async () =>
             {
@@ -146,16 +158,6 @@ namespace ArQuestTrail
             LastMessage = report.Ok ? "Thanks — the trail author will take a look." : "Couldn't send the report: " + Describe(report.Error);
         });
 
-        /// <summary>SR-PRIV-02.</summary>
-        public Task DeleteMyDataAsync() => Run(async () =>
-        {
-            ApiResult<DeleteMyDataResponse> result = await Session.DeleteMyDataAsync();
-            if (!result.Ok)
-            {
-                LastMessage = "Couldn't delete your data: " + Describe(result.Error);
-            }
-        });
-
         /// <summary>After returning to the foreground: re-read progress and send anything queued.</summary>
         public Task ResyncAsync() => Run(async () =>
         {
@@ -164,6 +166,14 @@ namespace ArQuestTrail
         });
 
         public void ShowMessage(string message) => LastMessage = message;
+
+        /// <summary>Back to the menus: the pins leave the scene. Queued completions keep syncing.</summary>
+        public void Leave()
+        {
+            _playing = false;
+            LastMessage = null;
+            ClearPins();
+        }
 
         public void UpdatePins(PositionEstimate estimate, Transform viewer)
         {
@@ -196,7 +206,7 @@ namespace ArQuestTrail
         private void SyncPins()
         {
             TrailProgress progress = Progress;
-            if (progress == null)
+            if (progress == null || !_playing)
             {
                 ClearPins();
                 return;

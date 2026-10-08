@@ -216,5 +216,33 @@ namespace ArQuestTrail.Core.Tests.Contract
             await player.Api.SignInAsync();
             Assert.NotEqual(playerId, player.Api.PlayerId);
         }
+
+        [ContractFact]
+        public async Task Joins_a_trail_by_its_code_and_by_the_link_its_qr_code_carries()
+        {
+            (string trailId, string joinCode) = await ContractAdmin.CreateJoinableTrailAsync(
+                Unique("Contract join"),
+                new PinSpec { EastMeters = 0 },
+                new PinSpec { EastMeters = 300 });
+            var player = new ContractPlayer();
+
+            ApiResult<LibraryEntry> typed = await player.Session.JoinAsync(joinCode.ToLowerInvariant());
+            ApiResult<LibraryEntry> linked = await new ContractPlayer().Session.JoinAsync(
+                ContractEnvironment.ApiUrl.TrimEnd('/') + "/join/" + joinCode.Replace("-", ""));
+            ApiResult<LibraryEntry> unknown = await player.Session.JoinAsync("ZZZZ-ZZZZ");
+
+            Assert.True(typed.Ok, typed.Error?.ToString());
+            Assert.Equal(trailId, typed.Value.TrailId);
+            Assert.Equal(joinCode, typed.Value.JoinCode);
+            Assert.Equal(2, typed.Value.PinCount);
+            Assert.True(linked.Ok, linked.Error?.ToString());
+            Assert.Equal(trailId, linked.Value.TrailId);
+            Assert.Equal("join_code_not_found", unknown.Error.Code);
+
+            // The joined trail plays like any other, and the list follows the attempt.
+            await player.Session.StartOrResumeAsync(trailId);
+            LibraryEntry entry = Assert.Single(player.Session.Library.Entries);
+            Assert.Equal(LibraryStatus.Active, entry.Status);
+        }
     }
 }

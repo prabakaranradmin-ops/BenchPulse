@@ -53,6 +53,7 @@ namespace ArQuestTrail.Core.Tests
         private readonly Dictionary<string, TrailDto> _versions = new Dictionary<string, TrailDto>();
         private readonly Dictionary<string, string> _codes = new Dictionary<string, string>();
         private readonly Dictionary<string, FakeAttempt> _attempts = new Dictionary<string, FakeAttempt>();
+        private readonly Dictionary<string, string> _trailsByJoinCode = new Dictionary<string, string>();
         private int _ids;
 
         /// <summary>Every request fails as if the device had no connection.</summary>
@@ -110,6 +111,9 @@ namespace ArQuestTrail.Core.Tests
 
         public void DeleteUser(string userId) => _deletedUsers.Add(userId);
 
+        /// <summary>ST-2.10: makes <paramref name="code"/> (canonical form) resolve to the trail.</summary>
+        public void AssignJoinCode(string trailId, string code) => _trailsByJoinCode[code] = trailId;
+
         private HttpResponseData Handle(HttpRequestSpec request)
         {
             if (Offline)
@@ -160,6 +164,32 @@ namespace ArQuestTrail.Core.Tests
             }
 
             Match match;
+            if (request.Method == "GET" && (match = Regex.Match(path, "^/api/v1/join/([^/]+)$")).Success)
+            {
+                string code = JoinCode.Normalize(Uri.UnescapeDataString(match.Groups[1].Value));
+                if (code == null)
+                {
+                    return FakeTransport.Respond(400, new { error = "invalid_join_code" });
+                }
+
+                // As on the server: an unpublished trail is indistinguishable from no trail.
+                if (!_trailsByJoinCode.TryGetValue(code, out string joinedTrailId)
+                    || !_currentVersionByTrail.TryGetValue(joinedTrailId, out string currentVersionId))
+                {
+                    return FakeTransport.Respond(404, new { error = "join_code_not_found" });
+                }
+
+                TrailDto current = _versions[currentVersionId];
+                return FakeTransport.Respond(200, new JoinedTrailDto
+                {
+                    TrailId = joinedTrailId,
+                    Name = current.Name,
+                    JoinCode = JoinCode.Format(code),
+                    PinCount = current.Pins.Count,
+                    ExpiryDays = current.ExpiryDays,
+                });
+            }
+
             if (request.Method == "GET" && (match = Regex.Match(path, "^/api/v1/trails/([^/]+)$")).Success)
             {
                 string trailId = Uri.UnescapeDataString(match.Groups[1].Value);

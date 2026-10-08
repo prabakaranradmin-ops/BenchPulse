@@ -9,8 +9,8 @@ referenced throughout.
 
 | Folder | Assembly | What it is | How it's verified |
 | --- | --- | --- | --- |
-| `Assets/Scripts/Core/` | `ArQuestTrail.Core` | All client logic: API client and tokens, the SR-GEO-04 rule, dwell timing, VPS/GPS selection, offline outbox, caching, progress. **No `UnityEngine`.** | 104 unit tests + 5 contract tests against the real server (`dotnet/`), run in CI |
-| `Assets/Scripts/*.cs`, `Platform/` | `ArQuestTrail` | Thin MonoBehaviours: feed Unity's inputs into Core, draw the results, field-test HUD | Type-checked against Unity 2021.3 reference assemblies (Editor, Android, iOS defines) — not yet run in a real Editor |
+| `Assets/Scripts/Core/` | `ArQuestTrail.Core` | All client logic: API client and tokens, the SR-GEO-04 rule, dwell timing, VPS/GPS selection, offline outbox, caching, progress, join codes, the My trails list, and which screen leads where. **No `UnityEngine`.** | 166 unit tests + 6 contract tests against the real server (`dotnet/`), run in CI |
+| `Assets/Scripts/*.cs`, `Platform/` | `ArQuestTrail` | Thin MonoBehaviours: feed Unity's inputs into Core, draw the results — the app's screens (`AppScreens`) and the play screen (`QuestHud`) | Type-checked against Unity 2021.3 reference assemblies (Editor, Android, iOS defines) — not yet run in a real Editor |
 | `Assets/Scripts/ARCore/` | `ArQuestTrail.ARCore` | VPS via ARCore Geospatial + geospatial anchors | API calls checked line by line against ARCore Extensions 1.56.0 source — not compiled |
 | `Assets/Scripts/ARFoundation/` | `ArQuestTrail.ARFoundation` | Environment-depth occlusion | API calls checked against AR Foundation 6.6.2 source — not compiled |
 
@@ -26,9 +26,27 @@ profile) and tests them, including against the live server:
 
 ```bash
 cd client-unity/dotnet/ArQuestTrail.Core.Tests
-dotnet test                                     # 104 unit tests
-QUEST_API_URL=http://127.0.0.1:3000 QUEST_ADMIN_DEVICE_KEY=<promoted key> dotnet test   # + 5 contract tests
+dotnet test                                     # 166 unit tests
+QUEST_API_URL=http://127.0.0.1:3000 QUEST_ADMIN_DEVICE_KEY=<promoted key> dotnet test   # + 6 contract tests
 ```
+
+## The screens
+
+Decision 2026-10-07 #5: the non-AR screens now, the AR view's polish after the field test. All
+immediate-mode GUI (`UiKit` holds the shared look), so a bare scene runs the whole app.
+
+| Screen | What it does |
+| --- | --- |
+| Welcome | First run only: what the game is. |
+| Your location | Why location is needed, *before* the system prompt — GPS isn't started until this has been answered. "Not now" never traps the player; the play screen says when location is off. |
+| My trails | The trails this phone has joined, with progress (`TrailLibrary`, stored on the device — there is no server-side listing, per SR-DATA-02). |
+| Join a trail | Type a code, or arrive with one: an `arquest://join/CODE` link (the server's `/join/` page and QR codes lead here) is joined straight away. A pasted `https://…/join/CODE` URL works too. |
+| Trail details | Pins, time limit, code, progress; Start / Continue / See your result / Start again; remove from the list. |
+| Play | `QuestHud`, as before, with a back button. |
+| Settings | What's stored and sent, and delete-my-data (SR-PRIV-02), which returns the app to a first run. |
+
+The rules — first run, when to explain location, where a link goes, what Back does — are
+`Core/App/AppFlow.cs`, unit-tested; `AppScreens` only draws them.
 
 ## 1. Create the project
 
@@ -46,6 +64,21 @@ QUEST_API_URL=http://127.0.0.1:3000 QUEST_ADMIN_DEVICE_KEY=<promoted key> dotnet
 - XR Plug-in Management: enable ARCore (Android) / ARKit (iOS).
 - Android: min API per ARCore's current requirement; iOS: 13+. LiDAR is **not** required (SR-VIS-02).
 - iOS: set *Location Usage Description* (Player → Other Settings) — required for `Input.location`.
+  Something like "Shows how far the next pin is and confirms you've reached it."
+- **Join links (`arquest://join/CODE`):** iOS — Player → Other Settings → *Supported URL schemes*,
+  add `arquest`. Android — add an intent filter to a custom `AndroidManifest.xml`
+  (Player → Publishing Settings → *Custom Main Manifest*), inside the Unity activity:
+  ```xml
+  <intent-filter>
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data android:scheme="arquest" android:host="join" />
+  </intent-filter>
+  ```
+  Without this a QR code still works — the server's `/join/` page shows the code to type in.
+  (Opening the app straight from an `https` link needs Universal Links / App Links and a hosted
+  association file — not set up for the field test.)
 - ARCore Extensions config (Project Settings → XR → ARCore Extensions): enable **Geospatial** and
   set up authorization (API key or keyless) per Google's Geospatial docs. Without it, `EarthState`
   reports an error and the app falls back to GPS, which is handled — just not sub-meter.
@@ -58,12 +91,16 @@ QUEST_API_URL=http://127.0.0.1:3000 QUEST_ADMIN_DEVICE_KEY=<promoted key> dotnet
    docker compose exec api node dist/jobs/seedFieldTestTrail.js --lat 13.0827 --lng 80.2707 --code SWAN42
    ```
 2. New scene → empty GameObject → add **`QuestBootstrap`**. Set *Api Base Url* to
-   `http://127.0.0.1:3000` (the Editor may use plain http; phones may not) and *Trail Id* from the
-   seed output. Set the simulated start a little west of the first pin's coordinates.
-3. Press Play. The HUD shows position source, connectivity, the active pin with distance and
-   direction, and an **Editor walker**: tick *Walk to the active pin* and watch the dwell count up,
-   the server confirm, and the next pin unlock. Try the code pin with a wrong code, then the right
-   one typed sloppily (`swan 42`). Tick *Simulate airplane mode* mid-trail to exercise SR-NET-02.
+   `http://127.0.0.1:3000` (the Editor may use plain http; phones may not). Set the simulated start
+   a little west of the first pin's coordinates.
+3. Press Play and go through the app as a player: *Get started* → *Allow location* (the Editor
+   always has it) → *Join a trail* → the **join code** from the seed output → *Start trail*.
+   (Or set *Trail Id* from the seed output to skip straight to the play screen.)
+4. On the play screen the HUD shows position source, connectivity, the active pin with distance
+   and direction, and an **Editor walker**: tick *Walk to the active pin* and watch the dwell count
+   up, the server confirm, and the next pin unlock. Try the code pin with a wrong code, then the
+   right one typed sloppily (`swan 42`). Tick *Simulate airplane mode* mid-trail to exercise
+   SR-NET-02. *Back* returns to the trail's details; My trails shows the progress.
 
 That run covers the whole loop against the real server — everything except AR and real GPS.
 
@@ -95,15 +132,21 @@ That run covers the whole loop against the real server — everything except AR 
 | CR-04 / ST-9.2 indicators | `PositionEstimate.IsReducedPrecision`, `IsOffline` | `QuestHud` status lines |
 | SR-SEC-02 inputs | `LocationHistoryBuffer` | `QuestBootstrap` (every fix; foreground = session start) |
 | SR-VIS-01/02 occlusion | `DistanceFade` | `OcclusionFallbackController`, `ArFoundationDepthProvider` |
-| SR-PRIV-02 delete my data | `QuestSession.DeleteMyDataAsync` | `QuestHud` |
+| SR-PRIV-02 delete my data | `QuestSession.DeleteMyDataAsync` (clears the My trails list too) | `AppScreens` (Settings) |
 | ST-6.2 code entry | server-verified; `ChallengeTypes.CanVerifyOnDevice` | `QuestHud`, `QuestBootstrap.SubmitCodeAsync` |
+| ST-2.10 join codes and links | `JoinCode`, `QuestSession.JoinAsync`, `TrailLibrary` | `AppScreens`, `QuestBootstrap` (deep links) |
+| Screen flow, location explained before asked | `AppFlow` | `AppScreens`, `LocationPermission` |
 
 ## Known limits — before launch, not before the field test
 
 - **The device key sits in the app sandbox** (`persistentDataPath`), not iOS Keychain / Android
   Keystore. Fine for a field test; for launch it needs a native secure-storage plugin. Since the key
   *is* the account (ST-2.6), losing or leaking it loses or leaks the player.
-- **The HUD is IMGUI** — a field-test UI that needs no scene wiring, not the shipping design.
+- **The UI is IMGUI** — clean and self-contained, needing no scene wiring, but immediate-mode:
+  no animation, and the system font. Moving to UI Toolkit is a later polish step; the screen logic
+  is in Core and wouldn't change.
+- **Location keeps running in the menus** once started (only gameplay and SR-SEC-02 history are
+  limited to the play screen). Pausing it off the play screen would save battery.
 - **Pins are hidden, not approximated, without VPS.** SR-GEO-03 renders anchored pins only at
   ≤0.5m/≤5°; on GPS the HUD gives distance and direction instead, and gameplay continues.
 - **SR-GEO-01 floating-origin re-centring is deferred** (approved): ENU offsets are accurate across a

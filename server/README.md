@@ -83,8 +83,8 @@ npm run seed:field-test -- --lat 51.5 --lng -0.12 --pins 3 --spacing 80 --code S
 ```
 
 It creates an Admin, a test player, and a published trail whose pins march east from the given
-point (`--spacing` metres apart, `--radius`/`--dwell` to taste), then prints the device keys and
-pin coordinates the client needs. `--code` makes the final pin a `code_entry` challenge so a
+point (`--spacing` metres apart, `--radius`/`--dwell` to taste), then prints the trail's join
+code (what a player types in the app), the device keys, and the pin coordinates. `--code` makes the final pin a `code_entry` challenge so a
 field test exercises ST-6.2 as well as the dwell.
 
 Writes go through the same store and the same SR-ADMIN-01/02 validation as the Admin API, so a

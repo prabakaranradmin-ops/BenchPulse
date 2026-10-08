@@ -13,8 +13,9 @@ pick up `CLAUDE.md` automatically. `docs/backlog.md.txt` has per-story status.
 - `admin-web/` — the Admin authoring tool (React + CesiumJS), served by the server at `/admin/`:
   place pins on a 3D map, set challenges, see placement warnings as you go, publish versions,
   share join codes and QR codes, triage pin reports, read analytics. See its README.
-- `client-unity/` — the player app. All client logic lives in `Assets/Scripts/Core` as plain C#
-  with 109 tests (`client-unity/dotnet/`), five of which drive the client against the real
+- `client-unity/` — the player app: welcome, location, My trails, join by code or link, trail
+  details, settings, and the play screen. All client logic lives in `Assets/Scripts/Core` as plain
+  C# with 172 tests (`client-unity/dotnet/`), six of which drive the client against the real
   server. Thin Unity scripts sit on top; they're written and type-checked but not yet run in a
   Unity Editor. The Unity project itself is created through Unity Hub — see its README.
 - `docker-compose.yml` — the whole backend (API, admin tool, database, daily retention purge) in
@@ -35,8 +36,8 @@ pick up `CLAUDE.md` automatically. `docs/backlog.md.txt` has per-story status.
    dist/jobs/seedFieldTestTrail.js --lat <lat> --lng <lng> --code SWAN42` prints the trail id and
    device keys.
 3. **Unity, in the Editor first:** create the project per `client-unity/README.md`, add
-   `QuestBootstrap` to an empty scene, point it at `http://127.0.0.1:3000` and the seeded trail,
-   and play the whole loop with the Editor walker — no device needed.
+   `QuestBootstrap` to an empty scene, point it at `http://127.0.0.1:3000`, join the trail with
+   its code, and play the whole loop with the Editor walker — no device needed.
 4. **The field test (ST-4.3):** put an https tunnel in front of port 3000, build the AR scene to a
    phone, and walk the trail. Note per device what requirements §7's field matrix asks for.
 5. **Only after that:** visual QA of occlusion per device tier, the AR view's polish, and the

@@ -122,6 +122,13 @@ ST-4.3 field test. See `client-unity/README.md` for exactly what was verified ho
 - **ST-4.2 — Minimal UI** 🟡 CODE COMPLETE
   `QuestHud.cs` (IMGUI, no scene wiring): current pin, distance + direction, dwell progress,
   SR-GEO-04's weak-GPS wording, plus an Editor walker for playing the loop without a device.
+- **ST-4.4 — App screens (non-AR)** 🟡 CODE COMPLETE (NEW — decision 2026-10-07 #5)
+  `AppScreens.cs` over Core's `AppFlow` (tested): first-run welcome, the location explanation
+  shown *before* the system prompt (GPS no longer starts cold at launch), My trails, join by code
+  or `arquest://join/CODE` link (ST-2.10's client half: `JoinCode`, `QuestSession.JoinAsync`,
+  `TrailLibrary`, plus a contract test joining a real trail by code and by its QR URL), trail
+  details, and Settings with delete-my-data. Gameplay and SR-SEC-02 history are confined to the
+  play screen. Look: decision #2's clean default, shared by `UiKit`.
 - **ST-4.3 — Field test**: one real-device walkthrough of a 2-pin trail end to end, per the field
   test matrix in requirements §7, before adding anything past this point.
   **Deployable artifact exists:** `docker compose up --build` (repo root) runs Postgres+PostGIS,

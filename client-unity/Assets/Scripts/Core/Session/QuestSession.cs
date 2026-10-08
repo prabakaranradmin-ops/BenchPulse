@@ -50,6 +50,14 @@ namespace ArQuestTrail.Core
             "An earlier pin in this trail wasn't accepted, so this one needs to be played again.",
             null);
 
+        /// <summary>Caught on the device, so a typo costs no request (and none of the per-IP join budget).</summary>
+        private static readonly ApiError NotAJoinCodeError = new ApiError(
+            0,
+            ApiErrorKind.BadRequest,
+            "invalid_join_code",
+            "That isn't a trail code. Codes are 8 letters and numbers, like ABCD-EFGH.",
+            null);
+
         private readonly QuestApiClient _api;
         private readonly IKeyValueStore _data;
         private readonly DeviceIdentity _identity;
@@ -63,10 +71,14 @@ namespace ArQuestTrail.Core
             _identity = identity ?? throw new ArgumentNullException(nameof(identity));
             _trails = new TrailCache(dataStore);
             _outbox = new CompletionOutbox(dataStore, api, clock);
+            Library = new TrailLibrary(dataStore, clock);
         }
 
         /// <summary>SR-SEC-02's input; the Unity layer adds every fix and marks each foreground.</summary>
         public LocationHistoryBuffer History { get; } = new LocationHistoryBuffer();
+
+        /// <summary>"My trails": what this device has joined, and how far it got on each.</summary>
+        public TrailLibrary Library { get; }
 
         public TrailProgress Progress { get; private set; }
 
@@ -86,6 +98,34 @@ namespace ArQuestTrail.Core
 
         /// <summary>SR-PRIV-02: local data and the device key are gone; restart as a new player.</summary>
         public event Action PlayerDataDeleted;
+
+        /// <summary>
+        /// ST-2.10: a code the player typed, or a link or QR URL, to a trail on their list. Joining
+        /// needs the server — a code is the only way to discover a trail (SR-DATA-02) — but a
+        /// malformed code is refused here without a request.
+        /// </summary>
+        public async Task<ApiResult<LibraryEntry>> JoinAsync(string codeOrLink, CancellationToken cancellationToken = default)
+        {
+            string code = JoinCode.FromInput(codeOrLink);
+            if (code == null)
+            {
+                return ApiResult<LibraryEntry>.Failure(NotAJoinCodeError);
+            }
+
+            ApiResult<JoinedTrailDto> resolved = await _api.ResolveJoinCodeAsync(code, cancellationToken);
+            if (!resolved.Ok)
+            {
+                if (resolved.Error.IsRetryable)
+                {
+                    MarkUnreachable(resolved.Error);
+                }
+
+                return ApiResult<LibraryEntry>.Failure(resolved.Error);
+            }
+
+            MarkReachable();
+            return ApiResult<LibraryEntry>.Success(Library.Add(resolved.Value));
+        }
 
         /// <summary>SR-NET-01: the current trail from the network, or the cached copy when offline.</summary>
         public async Task<ApiResult<TrailDto>> LoadTrailAsync(string trailId, CancellationToken cancellationToken = default)
@@ -306,6 +346,7 @@ namespace ArQuestTrail.Core
                 MarkReachable();
                 SaveAttemptSnapshot(fetched.Value);
                 Progress.Rebuild(fetched.Value, _outbox.Pending);
+                Library.RecordAttempt(Progress.Trail, fetched.Value);
                 ProgressChanged?.Invoke();
                 return true;
             }
@@ -358,6 +399,7 @@ namespace ArQuestTrail.Core
             }
 
             Progress = new TrailProgress(version.Value, attempt, _outbox.Pending);
+            Library.RecordAttempt(version.Value, attempt);
             ProgressChanged?.Invoke();
             return ApiResult<TrailProgress>.Success(Progress, attemptFromCache);
         }

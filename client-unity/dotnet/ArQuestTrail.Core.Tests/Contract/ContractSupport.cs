@@ -139,12 +139,16 @@ namespace ArQuestTrail.Core.Tests.Contract
             public double RadiusM { get; set; } = 10;
         }
 
-        public static async Task<string> CreateTrailAsync(string name, params PinSpec[] pins)
+        public static async Task<string> CreateTrailAsync(string name, params PinSpec[] pins) =>
+            (await CreateJoinableTrailAsync(name, pins)).TrailId;
+
+        /// <summary>A published trail and the join code players reach it with (ST-2.10).</summary>
+        public static async Task<(string TrailId, string JoinCode)> CreateJoinableTrailAsync(string name, params PinSpec[] pins)
         {
             JObject created = await SendAsync("POST", "/api/v1/admin/trails", new JObject { ["name"] = name });
             string trailId = created["trailId"].ToString();
             await PublishAsync(trailId, pins);
-            return trailId;
+            return (trailId, created["joinCode"].ToString());
         }
 
         public static async Task<JObject> PublishAsync(string trailId, params PinSpec[] pins)

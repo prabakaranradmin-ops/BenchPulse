@@ -5,12 +5,13 @@ using UnityEngine;
 namespace ArQuestTrail
 {
     /// <summary>
-    /// ST-4.2's minimal UI, plus the player-facing parts of the spec: the reduced-precision and
-    /// offline indicators (SR-NET-03, CR-04, ST-9.2), pin inspection (CR-05), the GDR-04 summary,
-    /// replay (GDR-06), "can't find this pin" (GDR-09), and delete-my-data (SR-PRIV-02).
+    /// The play screen: ST-4.2's minimal UI, plus the player-facing parts of the spec — the
+    /// reduced-precision and offline indicators (SR-NET-03, CR-04, ST-9.2), pin inspection (CR-05),
+    /// the GDR-04 summary, replay (GDR-06) and "can't find this pin" (GDR-09). The other screens,
+    /// delete-my-data included, are <see cref="AppScreens"/>.
     ///
     /// Immediate-mode on purpose: it needs no prefabs or scene wiring, so the field test runs on a
-    /// bare scene. It is a field-test HUD, not the shipping UI — the spec leaves visual design open.
+    /// bare scene. The AR view's own polish comes after the field test (decision 2026-10-07 #5).
     /// </summary>
     public class QuestHud : MonoBehaviour
     {
@@ -21,7 +22,6 @@ namespace ArQuestTrail
         private string _code = string.Empty;
         private string _reportNote = string.Empty;
         private bool _reporting;
-        private bool _confirmingDelete;
         private bool _walking;
         private Vector2 _scroll;
         private GUIStyle _text;
@@ -36,19 +36,23 @@ namespace ArQuestTrail
 
         private void OnGUI()
         {
-            if (_game == null || _game.Session == null)
+            if (_game == null || _game.Session == null || _game.Flow.Screen != AppScreen.Playing)
             {
                 return;
             }
 
             BuildStyles();
-            float scale = Mathf.Max(1f, Screen.width / VirtualWidth);
-            GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1f));
-            float height = Screen.height / scale;
+            var (_, safe) = UiKit.BeginScaled();
 
-            GUILayout.BeginArea(new Rect(8, 8, VirtualWidth - 16, height - 16));
+            GUILayout.BeginArea(new Rect(safe.x + 8, safe.y + 8, Mathf.Min(VirtualWidth, safe.width) - 16, safe.height - 16));
             _scroll = GUILayout.BeginScrollView(_scroll);
             GUILayout.BeginVertical(_panel);
+
+            if (GUILayout.Button("← Back", GUILayout.Width(90)))
+            {
+                _game.LeaveTrail();
+                _reporting = false;
+            }
 
             DrawStatus();
             DrawTrail();
@@ -269,6 +273,11 @@ namespace ArQuestTrail
             {
                 QuestBootstrap.Fire(_game.Trail.ReplayAsync()); // GDR-06: a new attempt; this one stays
             }
+
+            if (GUILayout.Button("Back to my trails"))
+            {
+                _game.LeaveTrail();
+            }
         }
 
         private void DrawMessage()
@@ -313,29 +322,10 @@ namespace ArQuestTrail
                 }
             }
 
-            _game.Network.Enabled = GUILayout.Toggle(_game.Network.Enabled, " Simulate airplane mode (SR-NET test)");
-
-            if (!_confirmingDelete && GUILayout.Button("Delete my data"))
+            if (Application.isEditor || Debug.isDebugBuild)
             {
-                _confirmingDelete = true;
-            }
-
-            if (_confirmingDelete)
-            {
-                GUILayout.Label("This deletes your progress and location history for good, and this device starts over as a new player.", _alert);
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("Delete everything"))
-                {
-                    QuestBootstrap.Fire(_game.Trail.DeleteMyDataAsync());
-                    _confirmingDelete = false;
-                }
-
-                if (GUILayout.Button("Keep my data"))
-                {
-                    _confirmingDelete = false;
-                }
-
-                GUILayout.EndHorizontal();
+                // Requirements §7's airplane-mode test, without a real phone in airplane mode.
+                _game.Network.Enabled = GUILayout.Toggle(_game.Network.Enabled, " Simulate airplane mode (SR-NET test)");
             }
         }
 

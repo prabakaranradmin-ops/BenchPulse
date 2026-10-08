@@ -46,19 +46,18 @@ namespace ArQuestTrail
             }
         }
 
-        /// <summary>Run as a coroutine: asks for permission, starts the service, and waits for it.</summary>
+        /// <summary>
+        /// Run as a coroutine: starts the service and waits for it. Asking for the permission is
+        /// <see cref="LocationPermission"/>'s job, after the app has explained why — this never
+        /// prompts on Android, and on iOS the system prompt it triggers follows that explanation.
+        /// </summary>
         public IEnumerator Start(float desiredAccuracyM = 2f, float updateDistanceM = 0.5f)
         {
 #if UNITY_ANDROID
             if (!Permission.HasUserAuthorizedPermission(Permission.FineLocation))
             {
-                Permission.RequestUserPermission(Permission.FineLocation);
-                float waited = 0;
-                while (!Permission.HasUserAuthorizedPermission(Permission.FineLocation) && waited < 30f)
-                {
-                    waited += Time.unscaledDeltaTime;
-                    yield return null;
-                }
+                Status = "Location permission is off — allow it in the phone's settings for this app";
+                yield break;
             }
 #endif
             if (!Input.location.isEnabledByUser)
