@@ -40,10 +40,27 @@ npm run build    # dist/, which the server serves at /admin/ (restart it after t
 ```
 
 ```bash
-npm test             # lib/ unit tests (API client, draft model, formatting, routing, place search)
+npm test             # lib/ unit tests (API client, draft model, map sync, formatting, routing, place search)
+npm run typecheck
 npm run lint
 npm run format:check
 ```
+
+**Browser tests** (`e2e/`, Playwright) drive the built tool against a real server — sign in,
+place pins on the map, set a code, reload, publish, QR; a player's report through to "Show on
+map" and resolve; analytics. Any console error or uncaught exception fails them, which is what
+catches a CSP or WebGL regression that unit tests can't see. Every request except to the server
+under test is blocked, so they never touch OpenStreetMap. CI runs them on every push; locally:
+
+```bash
+npm run build                                   # the server serves this dist/ at /admin/
+# server running on :3000 with LANDCOVER_CHECKS=off, and an Admin key, e.g.
+#   (cd ../server && node dist/jobs/seedFieldTestTrail.js --lat 13.08 --lng 80.27 --admin-key "$KEY")
+npx playwright install chromium                 # once
+ADMIN_E2E_KEY="$KEY" npm run test:e2e           # ADMIN_E2E_URL defaults to http://127.0.0.1:3000
+```
+
+Failures leave a screenshot and a trace in `test-results/` (`npx playwright show-trace …`).
 
 ## The map
 
@@ -66,8 +83,9 @@ its usage policy asks.
 - CesiumJS is most of the bundle, so the editor is lazy-loaded; the other screens don't pay for
   it. `scripts/copy-cesium.mjs` copies Cesium's workers and assets into `public/cesium/`
   (gitignored) before every dev run and build.
-- Map entities are replaced only when their pin changes, each time under a fresh id — see the
-  comment on `syncEntities` in `src/components/MapView.tsx` for why re-adding an id in place
-  breaks Cesium's change tracking.
+- Map entities are replaced only when their pin changes, each time under a fresh id — see
+  `syncEntities` in `src/lib/mapEntities.ts` for why re-adding an id in place breaks Cesium's
+  change tracking. `mapEntities.test.ts` runs it against a real Cesium `EntityCollection` and
+  also pins down the Cesium behaviour itself.
 - `src/lib/` holds everything testable without a browser (API client, the draft model, formatting,
   routing, place search); components stay thin over it.

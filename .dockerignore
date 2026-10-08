@@ -15,4 +15,6 @@
 **/.env.*
 **/*.log
 admin-web/public/cesium
+admin-web/test-results
+admin-web/e2e
 server/src/**/*.test.ts

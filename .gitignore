@@ -8,6 +8,9 @@ coverage/
 .vitest-cache/
 # Copied from node_modules by admin-web/scripts/copy-cesium.mjs on every dev/build.
 admin-web/public/cesium/
+# Playwright's screenshots and traces from failed browser tests.
+admin-web/test-results/
+admin-web/playwright-report/
 
 # --- .NET (client-unity/dotnet: the Core library built and tested outside Unity) ---
 bin/

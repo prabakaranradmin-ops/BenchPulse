@@ -172,11 +172,90 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Typecheck and build
+      - name: Typecheck (app and browser tests)
+        run: npm run typecheck
+
+      - name: Build
         run: npm run build
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
+
+  admin-e2e:
+    name: Admin web in a browser (Playwright, against the real server)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4-alpine
+        env:
+          POSTGRES_USER: arquest
+          POSTGRES_PASSWORD: arquest
+          POSTGRES_DB: ar_quest_trail
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U arquest -d ar_quest_trail -h 127.0.0.1 -p 5432"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://arquest:arquest@localhost:5432/ar_quest_trail
+      ADMIN_E2E_URL: http://127.0.0.1:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            admin-web/package-lock.json
+
+      - name: Build the admin tool
+        working-directory: admin-web
+        run: npm ci && npm run build
+
+      - name: Build the server
+        working-directory: server
+        run: npm ci && npm run build && npm run migrate
+
+      - name: Start the server (it serves admin-web/dist at /admin/)
+        working-directory: server
+        run: |
+          JWT_SECRET="ci-$(openssl rand -hex 16)" LANDCOVER_CHECKS=off PORT=3000 nohup node dist/index.js > server.log 2>&1 &
+          curl --silent --fail --retry 30 --retry-delay 1 --retry-connrefused http://127.0.0.1:3000/health
+
+      - name: Promote a throwaway admin
+        working-directory: server
+        run: |
+          KEY="$(openssl rand -hex 32)"
+          echo "::add-mask::$KEY"
+          echo "ADMIN_E2E_KEY=$KEY" >> "$GITHUB_ENV"
+          node dist/jobs/seedFieldTestTrail.js --lat 13.0827 --lng 80.2707 --admin-key "$KEY" > /dev/null
+
+      - name: Install Chromium
+        working-directory: admin-web
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser tests
+        working-directory: admin-web
+        run: npm run test:e2e
+
+      - name: Screenshots and traces, if anything failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-e2e-results
+          path: admin-web/test-results/
+          retention-days: 7
+
+      - name: Server log, if anything failed
+        if: failure()
+        run: cat server/server.log || true
 
   image:
     name: Docker image (server + admin web)

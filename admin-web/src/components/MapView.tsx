@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import * as Cesium from 'cesium';
 import type { DraftPin } from '../lib/draft';
+import { pinKeyFromEntityId, syncEntities, type PinSeverity } from '../lib/mapEntities';
 
+export type { PinSeverity };
 export type MapMode = 'select' | 'add' | 'move';
-export type PinSeverity = 'error' | 'warning' | null;
 
 export interface MapViewProps {
   pins: DraftPin[];
@@ -20,17 +21,6 @@ export interface MapViewProps {
   onMapClick: (point: { lat: number; lng: number }) => void;
   onSelectPin: (key: string) => void;
 }
-
-const COLORS = {
-  pin: Cesium.Color.fromCssColorString('#14b8a6'),
-  selected: Cesium.Color.fromCssColorString('#f97316'),
-  error: Cesium.Color.fromCssColorString('#ef4444'),
-  warning: Cesium.Color.fromCssColorString('#f59e0b'),
-  route: Cesium.Color.fromCssColorString('#2dd4bf'),
-};
-
-const PIN_ENTITY_PREFIX = 'pin:';
-const ROUTE_SLOT = 'route';
 
 /**
  * The 3D placement map (ST-7.1 / GDR-05's "preview on the 3D map"). CesiumJS owns its WebGL scene,
@@ -96,7 +86,7 @@ export function MapView(props: MapViewProps) {
       if (point) current.onMapClick(point);
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-    syncEntities(viewer, latest.current, hasTerrain);
+    syncEntities(viewer.entities, latest.current, hasTerrain);
     if (latest.current.pins.length > 0) {
       frame(viewer, latest.current.pins);
     } else {
@@ -113,7 +103,9 @@ export function MapView(props: MapViewProps) {
 
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (viewer) syncEntities(viewer, { pins, selectedKey, severities }, Boolean(ionToken));
+    if (viewer) {
+      syncEntities(viewer.entities, { pins, selectedKey, severities }, Boolean(ionToken));
+    }
   }, [pins, selectedKey, severities, ionToken]);
 
   useEffect(() => {
@@ -137,121 +129,6 @@ export function MapView(props: MapViewProps) {
   }, [mode]);
 
   return <div ref={containerRef} className="cesium-container" />;
-}
-
-interface Rendered {
-  signature: string;
-  entity: Cesium.Entity;
-}
-
-/** What each widget currently shows, by slot ("route", or a pin's key). */
-const renderedByWidget = new WeakMap<Cesium.CesiumWidget, Map<string, Rendered>>();
-let entitySerial = 0;
-
-/**
- * Brings the map's entities in line with the draft, replacing only what changed — so typing a hint
- * doesn't rebuild (and flicker) every radius circle on the map.
- *
- * A changed entity is replaced under a *fresh* id. Removing and re-adding the same id inside one
- * suspendEvents() batch cancels out in Cesium's change tracking, and the visualizers then keep
- * drawing the old entity — stale colours, positions and route.
- */
-function syncEntities(
-  viewer: Cesium.CesiumWidget,
-  state: Pick<MapViewProps, 'pins' | 'selectedKey' | 'severities'>,
-  hasTerrain: boolean,
-) {
-  const { entities } = viewer;
-  const previous = renderedByWidget.get(viewer) ?? new Map<string, Rendered>();
-  const next = new Map<string, Rendered>();
-
-  const place = (
-    slot: string,
-    spec: unknown,
-    build: (id: string) => Cesium.Entity.ConstructorOptions,
-  ) => {
-    const signature = JSON.stringify(spec);
-    const existing = previous.get(slot);
-    if (existing && existing.signature === signature) {
-      next.set(slot, existing);
-      return;
-    }
-    if (existing) entities.remove(existing.entity);
-    entitySerial += 1;
-    next.set(slot, { signature, entity: entities.add(build(`${slot}#${entitySerial}`)) });
-  };
-
-  entities.suspendEvents();
-
-  if (state.pins.length > 1) {
-    const coordinates = state.pins.flatMap((pin) => [pin.lng, pin.lat]);
-    place(ROUTE_SLOT, { coordinates, hasTerrain }, (id) => ({
-      id,
-      polyline: {
-        positions: Cesium.Cartesian3.fromDegreesArray(coordinates),
-        width: 3,
-        // Only worth the cost (and the ground-polyline rendering path) when there is terrain to
-        // follow; on the plain globe the ellipsoid is the ground.
-        clampToGround: hasTerrain,
-        material: new Cesium.PolylineDashMaterialProperty({ color: COLORS.route, dashLength: 18 }),
-      },
-    }));
-  }
-
-  state.pins.forEach((pin, index) => {
-    const severity = state.severities.get(pin.key) ?? null;
-    const selected = pin.key === state.selectedKey;
-    const tone = selected ? 'selected' : (severity ?? 'pin');
-    const color = COLORS[tone];
-    const spec = {
-      lat: pin.lat,
-      lng: pin.lng,
-      radius: pin.radiusM,
-      tone,
-      number: index + 1,
-      hasTerrain,
-    };
-    place(PIN_ENTITY_PREFIX + pin.key, spec, (id) => ({
-      id,
-      position: Cesium.Cartesian3.fromDegrees(pin.lng, pin.lat),
-      point: {
-        pixelSize: selected ? 20 : 15,
-        color,
-        outlineColor: Cesium.Color.WHITE,
-        outlineWidth: 2,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-      label: {
-        text: String(index + 1),
-        font: '700 13px system-ui, sans-serif',
-        fillColor: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 3,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        pixelOffset: new Cesium.Cartesian2(0, -14),
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-      // The completion radius, as players will experience it (before SR-GEO-04 widening). With
-      // terrain, no height means "drape it over the ground"; without, it sits on the globe.
-      ellipse: {
-        semiMajorAxis: pin.radiusM,
-        semiMinorAxis: pin.radiusM,
-        height: hasTerrain ? undefined : 0,
-        material: color.withAlpha(0.22),
-        outline: !hasTerrain,
-        outlineColor: color,
-      },
-    }));
-  });
-
-  for (const [slot, rendered] of previous) {
-    if (!next.has(slot)) entities.remove(rendered.entity);
-  }
-  renderedByWidget.set(viewer, next);
-  entities.resumeEvents();
 }
 
 /** Frames every pin from straight above — the easiest angle for placing more. */
@@ -278,11 +155,7 @@ function frame(viewer: Cesium.CesiumWidget, pins: DraftPin[]) {
 function pinKeyAt(viewer: Cesium.CesiumWidget, position: Cesium.Cartesian2): string | null {
   const picked: unknown = viewer.scene.pick(position);
   const entity = (picked as { id?: unknown } | undefined)?.id;
-  if (entity instanceof Cesium.Entity && entity.id.startsWith(PIN_ENTITY_PREFIX)) {
-    // Ids are `pin:<key>#<serial>` (see syncEntities).
-    return entity.id.slice(PIN_ENTITY_PREFIX.length, entity.id.lastIndexOf('#'));
-  }
-  return null;
+  return entity instanceof Cesium.Entity ? pinKeyFromEntityId(entity.id) : null;
 }
 
 /** Where a click lands: on a 3D building or terrain when there is one, else on the globe. */

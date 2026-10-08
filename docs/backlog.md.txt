@@ -193,7 +193,9 @@ it a trail could only be created with raw SQL.)*
   without, a flat OpenStreetMap globe and no Cesium ion dependency at all.
   **Verified:** walked end to end in headless Chromium against the Docker image (sign in → create
   → place → code pin → reorder → reload → publish → QR → a player joins and reports a pin →
-  "Show on map" → resolve → analytics), with screenshots reviewed and no browser errors.
+  "Show on map" → resolve → analytics), with screenshots reviewed and no browser errors. That
+  walk is now `admin-web/e2e/` (Playwright), run by CI's `admin-e2e` job on every push; any
+  browser console error fails it. The map-sync rules are unit-tested against Cesium itself.
   **Not yet exercised:** the 3D terrain/buildings mode, which needs a real ion token.
 - **ST-7.2 — Publish flow** ✅ DONE
   `POST /api/v1/admin/trails` and `POST /api/v1/admin/trails/:trailId/versions` in
